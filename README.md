@@ -18,3 +18,13 @@ irm https://raw.githubusercontent.com/alvaro-francisco-gil/agent-desk/main/wt.ps
 It frees those keys, makes Alt+R type `/rename `, and keeps a copy of the old
 settings next to `settings.json`. Running it again changes nothing more. Alt+Esc stays
 with Windows; in herdr, Ctrl+Space then X closes a pane.
+
+## Open herdr on another machine with one key
+
+```powershell
+irm https://raw.githubusercontent.com/alvaro-francisco-gil/agent-desk/main/wt-ssh.ps1 | iex
+```
+
+It asks for the SSH target (`user@host`), a name and a key (Ctrl+Alt+H by default), then
+adds a Windows Terminal profile that runs `herdr` there over SSH, and a Start menu
+shortcut that opens it with that key from anywhere.
