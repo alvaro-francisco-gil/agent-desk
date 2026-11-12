@@ -25,6 +25,13 @@ with Windows; in herdr, Ctrl+Space then X closes a pane.
 irm https://raw.githubusercontent.com/alvaro-francisco-gil/agent-desk/main/wt-ssh.ps1 | iex
 ```
 
-It asks for the SSH target (`user@host`), a name and a key (Ctrl+Alt+H by default), then
-adds a Windows Terminal profile that runs `herdr` there over SSH, and a Start menu
-shortcut that opens it with that key from anywhere.
+It asks for the SSH target (`user@host`), a name and a key (Win+H by default), then
+adds a Windows Terminal profile that runs `herdr` there over SSH, a Start menu shortcut,
+and the key, which opens it from anywhere. A key with Win in it runs through
+[AutoHotkey](https://www.autohotkey.com), installed with winget when missing; Win+H
+takes over Windows voice typing. Everything carries a sheep icon.
+
+## Credits
+
+`sheep.ico` is the 🐑 from [Twemoji](https://github.com/jdecked/twemoji), © Twitter and
+contributors, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
