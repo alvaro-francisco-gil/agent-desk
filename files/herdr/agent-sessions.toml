@@ -1,0 +1,17 @@
+# No popup or sound when an agent in a background workspace finishes or needs input.
+[ui.toast]
+delivery = "off"
+
+[ui.sound]
+enabled = false
+
+# Agents without a row in rows_by_agent, i.e. shells opened with Alt+Enter: just
+# the pane name, which new-terminal.py indents to line up with the others.
+[ui.sidebar.agents]
+rows = [[{ token = "$heading_above", dim = true }], ["pane"], [{ token = "$heading_below", dim = true }]]
+
+# Claude puts its session name (--name, /rename, or its own title) in the terminal title.
+# paused/paused.py sorts the panel flat, workspace by workspace, so the row is just state and name.
+# The $heading tokens come from paused/paused.py: the heading over the paused list.
+[ui.sidebar.agents.rows_by_agent]
+claude = [[{ token = "$heading_above", dim = true }], ["state_icon", "terminal_title_stripped"], [{ token = "$heading_below", dim = true }]]

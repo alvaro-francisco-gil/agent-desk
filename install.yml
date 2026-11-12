@@ -1,0 +1,45 @@
+---
+# Installs agent-desk for the user who runs it, on this machine:
+#   ansible-playbook -i localhost, -c local install.yml
+# Add -e '{"agent_desk_repos_folders": ["~/work"]}' to have `cs` offer every git
+# repo in those folders; otherwise ~/.config/agent-desk/config.toml must already
+# say where the repos are (agent_desk/repos.py). A machine with its own setup
+# play includes tasks/agent_sessions.yml instead.
+- name: Install agent-desk
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    agent_desk_home: "{{ ansible_facts.env.HOME }}"
+    agent_desk_dir: "{{ playbook_dir }}"
+  tasks:
+    - name: Set up herdr, cs and Claude Code
+      ansible.builtin.include_tasks: tasks/agent_sessions.yml
+
+    - name: Create the agent-desk config directory
+      ansible.builtin.file:
+        path: "{{ agent_desk_home }}/.config/agent-desk"
+        state: directory
+        mode: "0755"
+      when: agent_desk_repos_folders is defined
+
+    - name: Point cs at the repo folders
+      ansible.builtin.copy:
+        dest: "{{ agent_desk_home }}/.config/agent-desk/config.toml"
+        content: |
+          [repos]
+          folders = {{ agent_desk_repos_folders | to_json }}
+        mode: "0644"
+      when: agent_desk_repos_folders is defined
+
+    - name: Check that cs knows where the repos are
+      ansible.builtin.stat:
+        path: "{{ agent_desk_home }}/.config/agent-desk/config.toml"
+      register: agent_desk_config
+
+    - name: Fail when cs has no repo list
+      ansible.builtin.fail:
+        msg: >-
+          ~/.config/agent-desk/config.toml is missing: re-run with
+          -e '{"agent_desk_repos_folders": ["~/work"]}' (your repo folder).
+      when: not agent_desk_config.stat.exists and not ansible_check_mode

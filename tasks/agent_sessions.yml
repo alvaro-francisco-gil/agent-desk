@@ -1,0 +1,297 @@
+---
+# Run by install.yml, or included by another play (a machine's own setup);
+# tests/test_agent_sessions.py runs it alone. Needs agent_desk_home (the user's
+# home) and agent_desk_dir (this repo's checkout).
+#
+# One herdr workspace per repo, opened by `cs` (Alt+N; the desktop binds SUPER+A
+# to it too), which reads the machine's repo list from
+# ~/.config/agent-desk/config.toml. herdr shows each agent's state and its Claude
+# session name; the status line repeats the name inside the session.
+
+- name: Create the Claude Code, ~/.local/bin and ~/.local/share directories
+  ansible.builtin.file:
+    path: "{{ agent_desk_home }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [.claude, .local/bin, .local/share]
+
+- name: Install herdr's Claude integration (session restore after a server restart)
+  ansible.builtin.command:
+    argv: [herdr, integration, install, claude]
+    creates: "{{ agent_desk_home }}/.claude/hooks/herdr-agent-state.sh"
+
+- name: Install the Claude Code status line
+  ansible.builtin.copy:
+    src: "{{ agent_desk_dir }}/files/claude-statusline.sh"
+    dest: "{{ agent_desk_home }}/.claude/statusline.sh"
+    mode: "0755"
+
+# Home/End jump to either end of the conversation. Only where Claude has no
+# keybindings yet, so hand-made ones are never replaced.
+- name: Install the Claude Code keybindings
+  ansible.builtin.copy:
+    src: "{{ agent_desk_dir }}/files/claude-keybindings.json"
+    dest: "{{ agent_desk_home }}/.claude/keybindings.json"
+    mode: "0644"
+    force: false
+
+# Alt+R types `/rename ` into the prompt for a name to follow. Claude's own
+# keybindings can only run /rename bare, which picks a name itself, so the
+# terminal types it: ghostty runs the herdr window, foot the others. Omarchy
+# writes both configs; a terminal whose Alt+R is already bound, or a foot.ini
+# without a [text-bindings] section to put the line in, is left alone.
+- name: Check for the ghostty and foot configs
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.config/{{ item }}"
+  loop: [ghostty/config, foot/foot.ini]
+  register: agent_desk_rename_terminals
+
+- name: Read the ghostty and foot configs
+  ansible.builtin.slurp:
+    src: "{{ item.stat.path }}"
+  loop: "{{ agent_desk_rename_terminals.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: agent_desk_rename_terminal_texts
+
+- name: Type /rename on Alt+R
+  ansible.builtin.lineinfile:
+    path: "{{ item.source }}"
+    line: "{{ agent_desk_rename_lines[item.item.item] }}"
+    insertafter: "{{ '^\\[text-bindings\\]$' if item.item.item == 'foot/foot.ini' else 'EOF' }}"
+  loop: "{{ agent_desk_rename_terminal_texts.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  vars:
+    agent_desk_rename_lines:
+      ghostty/config: 'keybind = alt+r=text:/rename\x20'
+      foot/foot.ini: '\x2frename\x20=Mod1+r'
+    agent_desk_rename_bound:
+      ghostty/config: '(?m)^\s*keybind\s*=\s*([a-z_]+:)*(alt|opt|option)\+r='
+      foot/foot.ini: '(?m)=\s*(\S+\s+)*(Mod1|Alt)\+r(\s|$)'
+    agent_desk_rename_has_section:
+      ghostty/config: true
+      foot/foot.ini: "{{ '[text-bindings]' in (item.content | b64decode) }}"
+  # A line already in place still runs, so a re-run reports ok rather than skipped.
+  when: >-
+    agent_desk_rename_lines[item.item.item] in (item.content | b64decode)
+    or (agent_desk_rename_has_section[item.item.item]
+        and not (item.content | b64decode is search(agent_desk_rename_bound[item.item.item])))
+
+# A fresh install has no settings.json until Claude or the integration writes
+# one, and in check mode the integration above doesn't run.
+- name: Check for the Claude Code settings
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.claude/settings.json"
+  register: agent_desk_claude_settings_file
+
+- name: Read the Claude Code settings
+  ansible.builtin.slurp:
+    src: "{{ agent_desk_home }}/.claude/settings.json"
+  register: agent_desk_claude_settings
+  when: agent_desk_claude_settings_file.stat.exists
+
+# Opus 5.5 has a 1M window and by default compacts only near 967K tokens. Quality
+# drops well before that (context rot), so compact at 450K, 45% of the window.
+# Every session joins Remote Control, so the Claude app can reach it. The display and
+# model keys are defaults for a fresh machine: a value already in
+# settings.json wins. Theme and turn duration then outrank Claude's /config toggles
+# for them, which write elsewhere, so change those two here or in settings.json.
+# The secret-file denies (files/claude-secret-denies.json) are added to any
+# deny rules already there, so they hold in every repo without a per-repo file.
+- name: Point Claude Code at the status line, compact at 450K tokens, silence its notifications, deny secret files and set the defaults
+  ansible.builtin.copy:
+    dest: "{{ agent_desk_home }}/.claude/settings.json"
+    content: "{{ agent_desk_claude_defaults | combine(agent_desk_claude) | combine({'statusLine': agent_desk_statusline, 'autoCompactWindow': 450000, 'preferredNotifChannel': 'notifications_disabled', 'permissions': agent_desk_claude_permissions | combine({'deny': agent_desk_claude_deny})}) | to_nice_json(indent=2, sort_keys=false) }}\n"
+    mode: "0644"
+  vars:
+    agent_desk_claude: >-
+      {{ (agent_desk_claude_settings.content | b64decode | from_json)
+         if agent_desk_claude_settings_file.stat.exists else {} }}
+    agent_desk_claude_permissions: "{{ agent_desk_claude.permissions | default({}) }}"
+    agent_desk_claude_secret_denies: "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/claude-secret-denies.json') | from_json }}"
+    # Ours go last, in file order: a `!` carve-out acts only on the rules before it.
+    agent_desk_claude_deny: >-
+      {{ (agent_desk_claude_permissions.deny | default([]) | reject('in', agent_desk_claude_secret_denies) | list)
+         + agent_desk_claude_secret_denies }}
+    agent_desk_statusline: { type: command, command: "~/.claude/statusline.sh" }
+    agent_desk_claude_defaults:
+      viewMode: focus
+      remoteControlAtStartup: true
+      spinnerTipsEnabled: false
+      showTurnDuration: false
+      prefersReducedMotion: true
+      theme: dark
+      model: opus
+      modelSettings: { claude-opus-5-5: { effortLevel: medium } }
+
+# Sets the keys inside the tables herdr's config may already declare, so no
+# table is declared twice; check mode runs it too, writing nothing.
+- name: Silence notifications and add session names to the herdr config
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/herdr/merge-tables.py') }}"
+      - "{{ agent_desk_home }}/.config/herdr/config.toml"
+      - "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/herdr/agent-sessions.toml') }}"
+      - "{{ '--check' if ansible_check_mode else '--apply' }}"
+  register: agent_desk_herdr_tables
+  changed_when: agent_desk_herdr_tables.stdout == 'changed'
+  check_mode: false
+
+# Omarchy writes the [keys] table at install. Each key below changes only if its
+# line still reads as Omarchy wrote it, so a hand-edited key is left alone.
+- name: Check for the herdr config
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+  register: agent_desk_herdr_config
+
+- name: Read the herdr config
+  ansible.builtin.slurp:
+    src: "{{ agent_desk_home }}/.config/herdr/config.toml"
+  register: agent_desk_herdr_config_text
+  when: agent_desk_herdr_config.stat.exists
+
+# Alt+W is the paused plugin's close (in the commands block below), which lands
+# on the next active agent instead of herdr's pick, often a paused one. An
+# earlier run put Alt+W on close_tab; take it back off.
+- name: Leave Alt+W to the paused plugin's close
+  ansible.builtin.replace:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+    regexp: '^close_tab = \["prefix\+k", "alt\+w"\]$'
+    replace: 'close_tab = "prefix+k"'
+  when: agent_desk_herdr_config.stat.exists
+
+# Alt+Enter leaves splitting to prefix+h; the herdr commands below take it.
+- name: Free Alt+Enter from splitting a pane
+  ansible.builtin.replace:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+    regexp: '^split_horizontal = \["prefix\+h", "alt\+enter"\]$'
+    replace: 'split_horizontal = "prefix+h"'
+  when: agent_desk_herdr_config.stat.exists
+
+# Each direction moves its Alt+arrow from the workspace key to the agent key on
+# its own, and only while that agent key is unset, so no key is ever duplicated.
+- name: "Move between agents with Alt+Up/Down"
+  ansible.builtin.replace:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+    regexp: '^{{ item.workspace }} = \["prefix\+shift\+{{ item.letter }}", "alt\+{{ item.arrow }}"\]$'
+    replace: "{{ item.workspace }} = \"prefix+shift+{{ item.letter }}\"\n{{ item.agent }} = \"alt+{{ item.arrow }}\""
+  loop:
+    - { workspace: previous_workspace, agent: previous_agent, letter: p, arrow: up }
+    - { workspace: next_workspace, agent: next_agent, letter: n, arrow: down }
+  loop_control:
+    label: "{{ item.agent }}"
+  when:
+    - agent_desk_herdr_config.stat.exists
+    # The agent key in any TOML spelling: bare, indented or quoted.
+    - not (agent_desk_herdr_config_text.content | b64decode
+           is search('(?m)^\s*(["\']?)' ~ item.agent ~ '\\1\s*='))
+
+- name: Put cs on PATH
+  ansible.builtin.file:
+    src: "{{ agent_desk_dir }}/bin/cs"
+    dest: "{{ agent_desk_home }}/.local/bin/cs"
+    state: link
+    force: true
+
+- name: Install the herdr terminal helpers
+  ansible.builtin.copy:
+    src: "{{ agent_desk_dir }}/files/herdr/{{ item.src }}"
+    dest: "{{ agent_desk_home }}/{{ item.dest }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: new-terminal.py, dest: .local/bin/herdr-new-terminal, mode: "0755" }
+    - { src: copy-pane.sh, dest: .local/bin/herdr-copy-pane, mode: "0755" }
+    - { src: rename.bash, dest: .local/share/herdr-rename.bash, mode: "0644" }
+  loop_control:
+    label: "{{ item.dest }}"
+
+# Omarchy writes .bashrc at install; a missing file is an error, not something to create.
+- name: Load /rename in every shell
+  ansible.builtin.lineinfile:
+    path: "{{ agent_desk_home }}/.bashrc"
+    line: "[[ -f ~/.local/share/herdr-rename.bash ]] && source ~/.local/share/herdr-rename.bash"
+
+# Alt+S files an agent under a paused heading in the agents panel. herdr keeps a
+# copy of the manifest in its registry, so a changed plugin is linked again.
+- name: Install the paused agents plugin
+  ansible.builtin.copy:
+    src: "{{ agent_desk_dir }}/files/herdr/paused/"
+    dest: "{{ agent_desk_home }}/.local/share/herdr-paused/"
+    mode: "0644"
+  register: agent_desk_herdr_paused
+
+- name: Check for herdr's plugin registry
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.config/herdr/plugins.json"
+  register: agent_desk_herdr_plugins
+
+- name: Read herdr's plugin registry
+  ansible.builtin.slurp:
+    src: "{{ agent_desk_home }}/.config/herdr/plugins.json"
+  register: agent_desk_herdr_plugins_text
+  when: agent_desk_herdr_plugins.stat.exists
+
+- name: Link the paused agents plugin
+  ansible.builtin.command:
+    argv: [herdr, plugin, link, "{{ agent_desk_home }}/.local/share/herdr-paused"]
+  changed_when: true
+  when: >-
+    agent_desk_herdr_paused is changed
+    or not agent_desk_herdr_plugins.stat.exists
+    or (agent_desk_home ~ '/.local/share/herdr-paused"')
+       not in (agent_desk_herdr_plugins_text.content | b64decode)
+
+# Arrays of tables are beyond merge-tables.py, so the herdr key commands are one
+# marked block at the end of the config. Alt+Enter: a shell in the agents panel,
+# bound only while nothing else in the config holds Alt+Enter (Omarchy's split
+# line is freed above). Alt+N: the cs repo picker in a popup. Alt+P: the Claude
+# sessions closed most recently, across repos, to reopen one (it takes Alt+P,
+# Claude's model picker, from Claude; /model does the same). Alt+W and Alt+S:
+# the paused agents plugin's close and pause.
+- name: Bind Alt+Enter, Alt+N, Alt+P, Alt+W and Alt+S in herdr
+  ansible.builtin.blockinfile:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+    marker: "# {mark} homelab herdr commands"
+    block: |
+      {% if agent_desk_herdr_alt_enter_free | bool %}
+      [[keys.command]]
+      key = "alt+enter"
+      type = "shell"
+      command = "{{ agent_desk_home }}/.local/bin/herdr-new-terminal"
+
+      {% endif %}
+      [[keys.command]]
+      key = "alt+n"
+      type = "popup"
+      command = "{{ agent_desk_home }}/.local/bin/cs"
+      width = "60%"
+      height = "60%"
+
+      [[keys.command]]
+      key = "alt+p"
+      type = "popup"
+      command = "{{ agent_desk_home }}/.local/bin/cs --closed"
+      width = "80%"
+      height = "60%"
+
+      [[keys.command]]
+      key = "alt+w"
+      type = "plugin_action"
+      command = "workstation.paused.close"
+      description = "close this tab and go to the next active agent"
+
+      [[keys.command]]
+      key = "alt+s"
+      type = "plugin_action"
+      command = "workstation.paused.toggle"
+      description = "pause or bring back this agent"
+  vars:
+    agent_desk_herdr_alt_enter_free: >-
+      {{ agent_desk_herdr_config_text.content | b64decode
+         | regex_replace('(?ms)^# BEGIN homelab herdr commands$.*?^# END homelab herdr commands$', '')
+         | regex_replace('(?m)^split_horizontal = \["prefix\+h", "alt\+enter"\]$', '')
+         is not search('"alt\+enter"') }}
+  when: agent_desk_herdr_config.stat.exists
