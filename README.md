@@ -6,6 +6,25 @@ Keyboard shortcuts and small tools for running Claude Code sessions in
 It holds the shortcuts and the tools, never a list of repos: which repos a machine
 works on is a file on that machine.
 
+## Install on Linux
+
+Needs [herdr](https://herdr.dev), Claude Code, Python 3.11+, `fzf`, `jq` and
+`ansible-core`. Then:
+
+```sh
+git clone https://github.com/alvaro-francisco-gil/agent-desk ~/agent-desk
+cd ~/agent-desk
+ansible-playbook -i localhost, -c local install.yml -e '{"agent_desk_repos_folders": ["~/work"]}'
+```
+
+`~/work` is wherever your repos are: `cs` (Alt+N in herdr) offers that folder and every
+git repo one or two levels inside it. Update with `git pull` and the same command.
+
+What you get in herdr: Alt+N starts Claude in a repo, Alt+P reopens a closed session,
+Alt+S parks an agent in a paused list, Alt+W closes a tab and lands on the next active
+agent, Alt+Enter opens a shell, Alt+Up/Down move between agents. Alt+R types `/rename `
+in Ghostty and foot. Claude Code gets a status line and settings defaults.
+
 ## Windows Terminal (SSH into a herdr machine)
 
 Windows Terminal keeps Alt+Enter, Alt+arrows and Alt+Shift+arrows for itself, so herdr

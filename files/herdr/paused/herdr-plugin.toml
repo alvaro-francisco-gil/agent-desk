@@ -1,0 +1,58 @@
+id = "workstation.paused"
+name = "Paused agents"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "Files agents under a paused heading at the bottom of the agents panel"
+platforms = ["linux"]
+
+[[startup]]
+command = ["python3", "paused.py", "sync"]
+
+[[actions]]
+id = "toggle"
+title = "Pause or bring back the focused agent"
+contexts = ["workspace"]
+command = ["python3", "paused.py", "toggle"]
+
+[[actions]]
+id = "close"
+title = "Close the focused tab and go to the next active agent"
+contexts = ["workspace"]
+command = ["python3", "paused.py", "close"]
+
+[[actions]]
+id = "sync"
+title = "Reapply the active and paused lists"
+contexts = ["workspace"]
+command = ["python3", "paused.py", "sync"]
+
+# pane.created tags a new pane before its agent shows up, so a new session never
+# sorts below the paused heading. The status event catches a Claude session id,
+# which arrives after detection.
+[[events]]
+on = "pane.created"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "pane.moved"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "tab.closed"
+command = ["python3", "paused.py", "sync"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "paused.py", "sync"]
