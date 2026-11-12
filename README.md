@@ -9,7 +9,15 @@ works on is a file on that machine.
 ## Install on Linux
 
 Needs [herdr](https://herdr.dev), Claude Code, Python 3.11+, `fzf`, `jq` and
-`ansible-core`. Then:
+`ansible-core`. On Ubuntu:
+
+```sh
+sudo apt install fzf jq pipx && pipx install ansible-core && pipx ensurepath
+curl -fsSL https://herdr.dev/install.sh | sh
+```
+
+[Ghostty](https://ghostty.org) is optional: with it, Alt+R types `/rename `, and `cs`
+opens herdr in it. Then:
 
 ```sh
 git clone https://github.com/alvaro-francisco-gil/agent-desk ~/agent-desk
