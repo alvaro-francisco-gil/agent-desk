@@ -51,3 +51,28 @@ def test_ago():
     assert ago(0, 120) == "2m ago"
     assert ago(0, 7200) == "2h ago"
     assert ago(0, 3 * 86400) == "3d ago"
+
+
+def test_cache_reads_only_what_was_added_and_rereads_a_shorter_file(tmp_path):
+    p = transcript(tmp_path, "a", tmp_path, {"type": "ai-title", "aiTitle": "first"})
+    cache: dict = {}
+    assert read_transcript(p, cache) == (tmp_path, "first")
+    offset = cache[str(p)]["offset"]
+    assert offset == p.stat().st_size
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "custom-title", "customTitle": "renamed"}, separators=(",", ":")) + "\n")
+        f.write('{"type":"custom-title","customTitle":"half wri')  # no newline yet
+    assert read_transcript(p, cache) == (tmp_path, "renamed")
+    assert cache[str(p)]["offset"] < p.stat().st_size
+    transcript(tmp_path, "a", tmp_path, {"type": "last-prompt", "lastPrompt": "again"})  # rewritten, shorter
+    assert read_transcript(p, cache) == (tmp_path, "again")
+
+
+def test_closed_sessions_keeps_its_cache_on_disk(tmp_path):
+    projects, repo, cache_file = tmp_path / "projects", tmp_path / "repo", tmp_path / "cache" / "t.json"
+    repo.mkdir()
+    transcript(projects, "s", repo, {"type": "custom-title", "customTitle": "x"})
+    assert [s.name for s in closed_sessions(projects, set(), cache_file=cache_file)] == ["x"]
+    assert str(projects / "-dir" / "s.jsonl") in json.loads(cache_file.read_text())
+    cache_file.write_text("not json")
+    assert [s.name for s in closed_sessions(projects, set(), cache_file=cache_file)] == ["x"]

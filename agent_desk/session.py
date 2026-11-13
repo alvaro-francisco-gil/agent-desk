@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from agent_desk import repos
-from agent_desk.closed import ago, closed_sessions, place
+from agent_desk.closed import CACHE, ago, closed_sessions, place
 
 HERDR_APP_ID = "org.omarchy.herdr"
 
@@ -115,7 +115,7 @@ def open_ids() -> set[str]:
 
 def pick_closed(found: dict[str, Path]) -> tuple[str, Path, str] | None:
     """List the closed sessions; returns the picked one's workspace label, folder and session id."""
-    sessions = closed_sessions(Path("~/.claude/projects").expanduser(), open_ids())
+    sessions = closed_sessions(Path("~/.claude/projects").expanduser(), open_ids(), cache_file=CACHE)
     if not sessions:
         print("cs: no closed sessions to reopen", file=sys.stderr)
         return None
