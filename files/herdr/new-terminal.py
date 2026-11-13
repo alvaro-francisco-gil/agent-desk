@@ -119,7 +119,7 @@ def main() -> None:
         options.cwd or cwd,
         "--label",
         name,
-        "--focus",
+        "--no-focus",
     )
     pane_id = tab["root_pane"]["pane_id"]
     herdr("pane", "rename", pane_id, INDENT + name)
@@ -134,6 +134,9 @@ def main() -> None:
         "--state",
         "idle",
     )
+    # Focus last: launched from a herdr key, this process is stopped once focus moves to
+    # the new tab, so focusing at creation left the pane unreported and out of the panel.
+    herdr("tab", "focus", tab["root_pane"]["tab_id"])
     if options.run:
         herdr("pane", "run", pane_id, options.run)
     elif typed:
