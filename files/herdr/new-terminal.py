@@ -14,6 +14,7 @@ import itertools
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 # The agents panel shows a shell by its pane name alone; a blank braille cell and
@@ -91,6 +92,23 @@ def free_name(name: str) -> str:
     return next(f"{name}-{n}" for n in itertools.count(1) if f"{name}-{n}" not in taken)
 
 
+def hold_shell(pane_id: str) -> None:
+    """Run the shell one level down, so herdr keeps the pane's `terminal` report.
+
+    herdr (0.9.5) clears a reported agent once the pane is back at its own shell's idle
+    prompt, which a plain shell always is. With a second bash in front, the pane's shell
+    is busy and the report stays; leaving that bash closes the tab, as before.
+    """
+    subprocess.run(["herdr", "pane", "wait-output", pane_id, "--regex", r"\S", "--timeout", "3000"],
+                   capture_output=True)
+    herdr("pane", "run", pane_id, "clear; bash; exit")
+    for _ in range(30):
+        info = herdr("pane", "process-info", "--pane", pane_id).get("process_info", {})
+        if info.get("foreground_process_group_id") not in (None, info.get("shell_pid")):
+            return
+        time.sleep(0.1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cwd", help="the tab's folder, instead of the source pane's")
@@ -123,6 +141,7 @@ def main() -> None:
     )
     pane_id = tab["root_pane"]["pane_id"]
     herdr("pane", "rename", pane_id, INDENT + name)
+    hold_shell(pane_id)
     herdr(
         "pane",
         "report-agent",
