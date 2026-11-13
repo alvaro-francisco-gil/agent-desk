@@ -615,7 +615,9 @@ def _new_terminal_replies(panes: list[dict], workspaces: list[dict] | None = Non
     return {
         "pane list": {"result": {"panes": panes}},
         "workspace list": {"result": {"workspaces": workspaces or []}},
-        "tab create": {"result": {"root_pane": {"pane_id": "w9:p9"}}},
+        "tab create": {"result": {"root_pane": {"pane_id": "w9:p9", "tab_id": "w9:t9"}}},
+        # A second bash is in front of the pane's own shell.
+        "pane process-info": {"result": {"process_info": {"shell_pid": 1, "foreground_process_group_id": 2}}},
         "tab list": {"result": {"tabs": []}},
     }
 
@@ -627,7 +629,7 @@ def _indent() -> str:
 
 
 def _opened(calls: list) -> list:
-    looks = (["pane", "list"], ["workspace", "list"], ["pane", "read"])
+    looks = (["pane", "list"], ["workspace", "list"], ["pane", "read"], ["pane", "wait-output"], ["pane", "process-info"])
     return [call for call in calls if call[:2] not in looks]
 
 
@@ -655,9 +657,10 @@ def test_new_terminal_opens_a_named_terminal_agent_beside_the_source_pane(
             f"/{workspace}",
             "--label",
             "terminal",
-            "--focus",
+            "--no-focus",
         ],
         ["pane", "rename", "w9:p9", _indent() + "terminal"],
+        ["pane", "run", "w9:p9", "clear; bash; exit"],
         [
             "pane",
             "report-agent",
@@ -669,6 +672,7 @@ def test_new_terminal_opens_a_named_terminal_agent_beside_the_source_pane(
             "--state",
             "idle",
         ],
+        ["tab", "focus", "w9:t9"],
     ]
 
 
@@ -698,7 +702,7 @@ def test_new_terminal_names_an_app_tab_and_runs_its_command(recorder, labels, ex
         "/app",
         "--label",
         expected,
-        "--focus",
+        "--no-focus",
     ]
     assert opened[1] == ["pane", "rename", "w9:p9", _indent() + expected]
     assert opened[-1] == ["pane", "run", "w9:p9", "pnpm app:start"]
@@ -759,7 +763,9 @@ def test_new_terminal_opens_the_tab_when_the_clipboard_cannot_be_read(recorder):
     assert [call[:2] for call in _opened(calls)] == [
         ["tab", "create"],
         ["pane", "rename"],
+        ["pane", "run"],
         ["pane", "report-agent"],
+        ["tab", "focus"],
     ]
 
 
