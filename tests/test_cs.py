@@ -112,3 +112,87 @@ def test_the_cs_entry_point_runs_through_a_symlink(tmp_path):
     link.symlink_to(Path(__file__).resolve().parents[1] / "bin" / "cs")
     done = subprocess.run([sys.executable, str(link), "--help"], capture_output=True, text=True)
     assert done.returncode == 0 and "usage: cs" in done.stdout
+
+
+# ── Accounts ───────────────────────────────────────────────────────────────
+
+
+def _opened(monkeypatch) -> list:
+    import agent_desk.session as session
+
+    opened = []
+    monkeypatch.setattr(session, "ensure_server", lambda: None)
+    monkeypatch.setattr(session, "open_session", lambda label, path, command: opened.append((label, path, command)))
+    monkeypatch.setenv("HERDR_ENV", "1")
+    return opened
+
+
+def test_without_accounts_only_the_login_one_is_offered(tmp_path, work):
+    from agent_desk import accounts
+
+    assert accounts.load(config(tmp_path, f'[repos]\nfolders = ["{work}"]\n')) == {"login": None}
+
+
+def test_accounts_come_after_login_in_config_order(tmp_path, work):
+    from agent_desk import accounts
+
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.b]\ntoken_file = "/t/b.json"\n[accounts.a]\ntoken_file = "/t/a.json"\n'
+    assert list(accounts.load(config(tmp_path, body))) == ["login", "b", "a"]
+
+
+@pytest.mark.parametrize(("entry", "error"), [("[accounts.login]\ntoken_file = \"/x\"\n", "reserved"),
+                                               ("[accounts.x]\n", "needs a token_file")])
+def test_a_bad_account_fails_loudly(tmp_path, work, capsys, entry, error):
+    assert main(["zeta"], config(tmp_path, f'[repos]\nfolders = ["{work}"]\n' + entry)) == 1
+    assert error in capsys.readouterr().err
+
+
+def test_as_starts_claude_with_that_accounts_token_read_from_its_file(tmp_path, work, monkeypatch):
+    token = tmp_path / "second.json"
+    token.write_text('{"token": "sk-secret"}')
+    opened = _opened(monkeypatch)
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.second]\ntoken_file = "{token}"\n'
+    assert main(["zeta", "--as", "second"], config(tmp_path, body)) == 0
+    (label, _, command), = opened
+    assert label == "zeta" and "sk-secret" not in command
+    assert command.startswith("CLAUDE_ACCOUNT=second ") and command.endswith(" claude")
+    done = subprocess.run(["bash", "-c", command.removesuffix(" claude") + ' printenv CLAUDE_CODE_OAUTH_TOKEN'],
+                          capture_output=True, text=True)
+    assert done.stdout.strip() == "sk-secret"
+
+
+def test_as_login_or_no_flag_is_plain_claude(tmp_path, work, monkeypatch):
+    opened = _opened(monkeypatch)
+    path = config(tmp_path, f'[repos]\nfolders = ["{work}"]\n')
+    assert main(["zeta"], path) == 0 and main(["zeta", "--as", "login"], path) == 0
+    assert [c for _, _, c in opened] == ["claude", "claude"]
+
+
+def test_unknown_account_or_missing_token_fails_before_touching_herdr(tmp_path, work, monkeypatch, capsys):
+    opened = _opened(monkeypatch)
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.second]\ntoken_file = "{tmp_path / "none.json"}"\n'
+    assert main(["zeta", "--as", "nobody"], config(tmp_path, body)) == 1
+    assert main(["zeta", "--as", "second"], config(tmp_path, body)) == 1
+    assert opened == []
+    err = capsys.readouterr().err
+    assert "--as needs one of: login, second" in err and "is missing" in err
+
+
+def test_the_picker_starts_alt_2_on_the_second_account(tmp_path, work, monkeypatch):
+    import agent_desk.session as session
+
+    token = tmp_path / "second.json"
+    token.write_text('{"token": "t"}')
+    seen = {}
+
+    def fzf(argv, input, stdout, text):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout="alt-2\nzeta\n")
+
+    monkeypatch.setattr(session.shutil, "which", lambda _: "/usr/bin/fzf")
+    monkeypatch.setattr(session.subprocess, "run", fzf)
+    opened = _opened(monkeypatch)
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.second]\ntoken_file = "{token}"\n'
+    assert main([], config(tmp_path, body)) == 0
+    assert "alt+2: second" in " ".join(seen["argv"])
+    assert opened[0][2].startswith("CLAUDE_ACCOUNT=second ")

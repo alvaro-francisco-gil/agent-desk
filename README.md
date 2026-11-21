@@ -33,6 +33,23 @@ Alt+S parks an agent in a paused list, Alt+W closes a tab and lands on the next 
 agent, Alt+Enter opens a shell, Alt+Up/Down move between agents. Alt+R types `/rename `
 in Ghostty and foot. Claude Code gets a status line and settings defaults.
 
+### A second Claude account
+
+`cs` starts Claude on the account you logged into with `/login`. To also start sessions on
+another account, without logging out: sign in as that account once, run `claude setup-token`,
+store the token as `{"token": "..."}` in a file only you can read (mode 0600), and name it in
+`~/.config/agent-desk/config.toml`:
+
+```toml
+[accounts.second]
+token_file = "~/.config/agent-desk/second.json"
+```
+
+In the Alt+N picker, Enter starts the session on the `/login` account and Alt+2 on `second`
+(Alt+3 on a third). `cs <repo> --as second` does the same from a shell. The status line shows
+the account's name in magenta after the session name; no name means the `/login` account.
+Settings, history, memory and plugins are shared. Alt+P reopens a session on the `/login` account.
+
 ## Windows Terminal (SSH into a herdr machine)
 
 Windows Terminal keeps Alt+Enter, Alt+arrows and Alt+Shift+arrows for itself, so herdr

@@ -868,14 +868,14 @@ def test_copy_pane_without_focus_copies_nothing(recorder, tmp_path):
 # ── Status line ────────────────────────────────────────────────────────────
 
 
-def _statusline(home: Path, payload: dict) -> str:
+def _statusline(home: Path, payload: dict, **account: str) -> str:
     _need("bash", "jq", "git")
     done = subprocess.run(
         [str(STATUSLINE)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        env=dict(os.environ, HOME=str(home)),
+        env={k: v for k, v in os.environ.items() if k != "CLAUDE_ACCOUNT"} | {"HOME": str(home), **account},
     )
     assert done.returncode == 0, done.stderr
     return done.stdout
@@ -922,6 +922,12 @@ def test_workspace_root_and_a_directory_without_git(githubs):
         _strip(_statusline(githubs, {"session_name": "s", "cwd": str(elsewhere)}))
         == f"s · {elsewhere}"
     )
+
+
+def test_a_session_on_another_account_names_it_after_the_session(githubs):
+    out = _statusline(githubs, {"session_name": "s", "cwd": str(githubs / "githubs" / "infra")},
+                      CLAUDE_ACCOUNT="second")
+    assert _strip(out) == "s · second · infra · feat/x"
 
 
 @pytest.mark.parametrize(
