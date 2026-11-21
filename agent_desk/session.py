@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_desk import repos
+from agent_desk import accounts, repos
 from agent_desk.closed import CACHE, ago, closed_sessions, place
 
 HERDR_APP_ID = "org.omarchy.herdr"
@@ -99,12 +99,21 @@ def show_hyprland_herdr_window() -> None:
     detached(["omarchy-launch-tui", f"--app-id={HERDR_APP_ID}", "herdr"])
 
 
-def pick(labels: list[str]) -> str | None:
+def pick(labels: list[str], names: list[str]) -> tuple[str, str] | None:
+    """The repo picked and the account to start it on: Enter is the first account, Alt+2… the next ones."""
     if not shutil.which("fzf"):
         raise RuntimeError("fzf is missing; pass the repo name instead: cs <repo>")
-    done = subprocess.run(["fzf", "--prompt", "claude in ▸ ", "--height", "~100%", "--reverse"],
-                          input="\n".join(labels), capture_output=False, stdout=subprocess.PIPE, text=True)
-    return done.stdout.strip() or None
+    keys = {f"alt-{i}": name for i, name in enumerate(names[1:], start=2)}
+    argv = ["fzf", "--prompt", "claude in ▸ ", "--height", "~100%", "--reverse"]
+    if keys:
+        hint = "  ".join([f"enter: {names[0]}"] + [f"{k.replace('alt-', 'alt+')}: {n}" for k, n in keys.items()])
+        argv += ["--expect", ",".join(keys), "--header", hint]
+    done = subprocess.run(argv, input="\n".join(labels), stdout=subprocess.PIPE, text=True)
+    lines = done.stdout.splitlines()
+    key, label = (lines + ["", ""])[:2] if keys else ("", lines[0] if lines else "")
+    if not label.strip():
+        return None
+    return label.strip(), keys.get(key, names[0])
 
 
 def open_ids() -> set[str]:
@@ -152,20 +161,34 @@ def reopen(found: dict[str, Path]) -> int:
 
 def main(argv: list[str], config: Path = repos.CONFIG) -> int:
     if argv and argv[0] in ("-h", "--help"):
-        print("usage: cs [repo]    start Claude in a repo, as a herdr workspace named after it\n"
+        print("usage: cs [repo] [--as account]  start Claude in a repo, as a herdr workspace named after it\n"
+              "                                 (in the picker, Alt+2… start it on the next accounts)\n"
               "       cs <repo> --run <line>  type <line> at the new tab's prompt instead of claude\n"
-              "       cs --closed  reopen one of the Claude sessions closed most recently")
+              "       cs --closed  reopen one of the Claude sessions closed most recently\n"
+              "       cs --accounts  list the accounts in this machine's config")
         return 0
     try:
         found = repos.load(config)
+        known = accounts.load(config)
     except repos.ConfigError as e:
         print(f"cs: {e}", file=sys.stderr)
         return 1
+    if argv and argv[0] == "--accounts":
+        print("\n".join(known))
+        return 0
     if argv and argv[0] == "--closed":
         return reopen(found)
+    account = None
+    if "--as" in argv:
+        i = argv.index("--as")
+        if i + 1 >= len(argv) or argv[i + 1] not in known:
+            print(f"cs: --as needs one of: {', '.join(known)}", file=sys.stderr)
+            return 1
+        account = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     # --run lets a desktop action (the Omarchy crash toast) start its own command
     # in a repo's herdr workspace instead of a loose terminal window.
-    command = "claude"
+    command = None
     if len(argv) == 3 and argv[1] == "--run":
         command = argv[2]
         argv = argv[:1]
@@ -173,15 +196,24 @@ def main(argv: list[str], config: Path = repos.CONFIG) -> int:
         print("cs: --run needs a repo before it and one line after it", file=sys.stderr)
         return 1
     labels = list(found)
-    label = match(labels, argv[0]) if argv else pick(labels)
-    if label is None:
-        if argv:
+    if argv:
+        label = match(labels, argv[0])
+        if label is None:
             print(f"cs: no single repo matches {argv[0]!r}", file=sys.stderr)
-        return 1
+            return 1
+    else:
+        picked = pick(labels, list(known))
+        if picked is None:
+            return 1
+        label, chosen = picked
+        account = account or chosen
+    account = account or accounts.LOGIN
     try:
+        if command is None:
+            command = accounts.command(account, known[account])
         ensure_server()
         open_session(label, found[label], command)
-    except RuntimeError as e:
+    except (RuntimeError, repos.ConfigError) as e:
         print(f"cs: {e}", file=sys.stderr)
         return 1
     if os.environ.get("HERDR_ENV") != "1":

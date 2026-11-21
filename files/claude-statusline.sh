@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Code status line: session name · repo · branch · context used. Installed to
+# Claude Code status line: session name · account (if not the /login one) · repo · branch · context used. Installed to
 # ~/.claude/statusline.sh by tasks/agent_sessions.yml.
 input=$(cat)
 name=$(jq -r '.session_name // empty' <<<"$input")
@@ -10,6 +10,10 @@ branch=$(git -C "$dir" branch --show-current 2>/dev/null)
 ctx=$(jq -r '.context_window.used_percentage // empty | floor' <<<"$input")
 
 printf '\e[1;36m%s\e[0m' "${name:-unnamed — /rename to name it}"
+# cs --as <account> sets CLAUDE_ACCOUNT, and Claude passes its environment on to this script.
+if [[ -n ${CLAUDE_ACCOUNT:-} ]]; then
+  printf ' · \e[1;35m%s\e[0m' "$CLAUDE_ACCOUNT"
+fi
 printf ' · %s' "$repo"
 if [[ -n $branch ]]; then
   printf ' · \e[2m%s\e[0m' "$branch"
