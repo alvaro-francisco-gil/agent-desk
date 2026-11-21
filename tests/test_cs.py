@@ -196,3 +196,125 @@ def test_the_picker_starts_alt_2_on_the_second_account(tmp_path, work, monkeypat
     assert main([], config(tmp_path, body)) == 0
     assert "alt+2: second" in " ".join(seen["argv"])
     assert opened[0][2].startswith("CLAUDE_ACCOUNT=second ")
+
+
+# ── Switching a conversation to another account ────────────────────────────
+
+
+from agent_desk import switch  # noqa: E402
+
+
+def _s(sid: str, name: str, pane: str | None = None, cwd: Path = Path("/r")) -> switch.Session:
+    return switch.Session(sid, cwd, name, pane)
+
+
+def test_find_takes_id_then_prefix_then_name_then_part_of_a_name():
+    sessions = [_s("aaaaaaaa-1111", "spend-credits", "w1:p1"), _s("bbbbbbbb-2222", "calendar")]
+    assert switch.find("bbbbbbbb-2222", sessions).name == "calendar"
+    assert switch.find("aaaaaaaa", sessions).name == "spend-credits"
+    assert switch.find("calendar", sessions).session_id == "bbbbbbbb-2222"
+    assert switch.find("SPEND", sessions).session_id == "aaaaaaaa-1111"
+
+
+def test_find_refuses_a_short_prefix_an_unknown_name_and_two_matches():
+    sessions = [_s("aaaaaaaa-1", "plan one"), _s("aaaaaaaa-2", "plan two")]
+    with pytest.raises(switch.NotFound, match="no session matches"):
+        switch.find("aaa", [_s("aaaaaaaa-1", "x")])
+    with pytest.raises(switch.NotFound, match="2 sessions match 'plan'"):
+        switch.find("plan", sessions)
+
+
+def test_all_sessions_lists_open_ones_by_pane_then_closed_ones(tmp_path):
+    projects = tmp_path / "projects" / "-r"
+    projects.mkdir(parents=True)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for sid, title in (("open-1", "running"), ("shut-1", "finished")):
+        (projects / f"{sid}.jsonl").write_text(
+            f'{{"cwd": "{repo}"}}\n{{"type":"custom-title","customTitle":"{title}"}}\n')
+
+    def herdr(*args):
+        return {"agents": [{"pane_id": "w1:p1", "terminal_title_stripped": "running", "cwd": str(repo),
+                            "agent_session": {"value": "open-1"}}]}
+
+    found = switch.all_sessions(herdr, tmp_path / "projects")
+    assert [(s.session_id, s.pane_id, s.cwd) for s in found] == [("open-1", "w1:p1", repo), ("shut-1", None, repo)]
+
+
+def test_run_closes_an_open_session_then_resumes_it_on_the_account(tmp_path):
+    token = tmp_path / "t.json"
+    token.write_text('{"token": "x"}')
+    calls, opened, running = [], [], {"value": True}
+
+    def herdr(*args):
+        calls.append(args)
+        if args[:2] == ("pane", "close"):
+            running["value"] = False
+        agents = [{"pane_id": "w1:p1", "agent_session": {"value": "sid-1"}}] if running["value"] else []
+        return {"agents": agents}
+
+    switch.run(_s("sid-1", "n", "w1:p1", tmp_path), "repo", "second", token, herdr,
+               lambda label, cwd, command: opened.append((label, cwd, command)))
+    assert ("pane", "close", "w1:p1") in calls
+    (label, cwd, command), = opened
+    assert (label, cwd) == ("repo", tmp_path)
+    assert command.startswith("CLAUDE_ACCOUNT=second ") and command.endswith(" claude --resume sid-1")
+
+
+def test_run_on_the_login_account_is_plain_resume_and_a_closed_one_closes_nothing(tmp_path):
+    calls, opened = [], []
+    switch.run(_s("sid-2", "n", None, tmp_path), "repo", "login", None,
+               lambda *a: calls.append(a) or {}, lambda *a: opened.append(a))
+    assert calls == [] and opened == [("repo", tmp_path, "claude --resume sid-2")]
+
+
+def test_switch_checks_the_account_before_closing_anything(tmp_path, work, monkeypatch, capsys):
+    import agent_desk.session as session
+
+    monkeypatch.setattr(session, "ensure_server", lambda: None)
+    monkeypatch.setattr(switch, "all_sessions", lambda herdr: [_s("sid-1", "spend", "w1:p1")])
+    detached = []
+    monkeypatch.setattr(switch, "detach", detached.append)
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.second]\ntoken_file = "{tmp_path / "none.json"}"\n'
+    path = config(tmp_path, body)
+    assert main(["--switch", "spend"], path) == 1
+    assert main(["--switch", "spend", "--as", "second"], path) == 1
+    assert detached == []
+    assert "usage: cs --switch" in capsys.readouterr().err
+    assert main(["--switch", "spend", "--as", "login"], path) == 0
+    assert detached == [["--switch-now", "sid-1", "--as", "login"]]
+    assert "closing it and reopening it on login" in capsys.readouterr().out
+
+
+def test_alt_p_reopens_on_the_account_its_key_names(tmp_path, work, monkeypatch):
+    import agent_desk.session as session
+
+    token = tmp_path / "second.json"
+    token.write_text('{"token": "t"}')
+    monkeypatch.setattr(session, "closed_sessions",
+                        lambda *a, **k: [__import__("agent_desk.closed", fromlist=["Closed"]).Closed("sid-9", work / "zeta", "old", 0.0)])
+    monkeypatch.setattr(session, "open_ids", lambda: set())
+    monkeypatch.setattr(session.shutil, "which", lambda _: "/usr/bin/fzf")
+    monkeypatch.setattr(session.subprocess, "run",
+                        lambda argv, input, stdout, text: subprocess.CompletedProcess(argv, 0, stdout="alt-2\n0\tx\n"))
+    opened = _opened(monkeypatch)
+    body = f'[repos]\nfolders = ["{work}"]\n[accounts.second]\ntoken_file = "{token}"\n'
+    assert main(["--closed"], config(tmp_path, body)) == 0
+    assert opened[0][0] == "zeta" and opened[0][2].endswith("claude --resume sid-9")
+    assert opened[0][2].startswith("CLAUDE_ACCOUNT=second ")
+
+
+def test_here_is_the_callers_own_session(tmp_path, work, monkeypatch, capsys):
+    import agent_desk.session as session
+
+    monkeypatch.setattr(session, "ensure_server", lambda: None)
+    monkeypatch.setattr(switch, "all_sessions", lambda herdr: [_s("sid-1", "a", "w1:p1"), _s("sid-2", "b", "w1:p2")])
+    detached = []
+    monkeypatch.setattr(switch, "detach", detached.append)
+    path = config(tmp_path, f'[repos]\nfolders = ["{work}"]\n')
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-2")
+    assert main(["--switch", "here", "--as", "login"], path) == 0
+    assert detached == [["--switch-now", "sid-2", "--as", "login"]]
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    assert main(["--switch", "here", "--as", "login"], path) == 1
+    assert "only works from inside" in capsys.readouterr().err

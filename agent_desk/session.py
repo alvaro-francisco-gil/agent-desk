@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_desk import accounts, repos
+from agent_desk import accounts, repos, switch
 from agent_desk.closed import CACHE, ago, closed_sessions, place
 
 HERDR_APP_ID = "org.omarchy.herdr"
@@ -103,17 +103,10 @@ def pick(labels: list[str], names: list[str]) -> tuple[str, str] | None:
     """The repo picked and the account to start it on: Enter is the first account, Alt+2… the next ones."""
     if not shutil.which("fzf"):
         raise RuntimeError("fzf is missing; pass the repo name instead: cs <repo>")
-    keys = {f"alt-{i}": name for i, name in enumerate(names[1:], start=2)}
-    argv = ["fzf", "--prompt", "claude in ▸ ", "--height", "~100%", "--reverse"]
-    if keys:
-        hint = "  ".join([f"enter: {names[0]}"] + [f"{k.replace('alt-', 'alt+')}: {n}" for k, n in keys.items()])
-        argv += ["--expect", ",".join(keys), "--header", hint]
-    done = subprocess.run(argv, input="\n".join(labels), stdout=subprocess.PIPE, text=True)
-    lines = done.stdout.splitlines()
-    key, label = (lines + ["", ""])[:2] if keys else ("", lines[0] if lines else "")
-    if not label.strip():
-        return None
-    return label.strip(), keys.get(key, names[0])
+    done = subprocess.run(["fzf", "--prompt", "claude in ▸ ", "--height", "~100%", "--reverse", *account_flags(names)],
+                          input="\n".join(labels), stdout=subprocess.PIPE, text=True)
+    label, account = chosen(done.stdout, names)
+    return (label.strip(), account) if label.strip() else None
 
 
 def open_ids() -> set[str]:
@@ -122,8 +115,31 @@ def open_ids() -> set[str]:
     return {a["agent_session"]["value"] for a in agents if a.get("agent_session", {}).get("value")}
 
 
-def pick_closed(found: dict[str, Path]) -> tuple[str, Path, str] | None:
-    """List the closed sessions; returns the picked one's workspace label, folder and session id."""
+def account_keys(names: list[str]) -> dict[str, str]:
+    """fzf key → account: Enter is the first account, Alt+2… the next ones."""
+    return {f"alt-{i}": name for i, name in enumerate(names[1:], start=2)}
+
+
+def account_flags(names: list[str]) -> list[str]:
+    keys = account_keys(names)
+    if not keys:
+        return []
+    hint = "  ".join([f"enter: {names[0]}"] + [f"{k.replace('alt-', 'alt+')}: {n}" for k, n in keys.items()])
+    return ["--expect", ",".join(keys), "--header", hint]
+
+
+def chosen(stdout: str, names: list[str]) -> tuple[str, str]:
+    """fzf's output with account_flags: (picked line, account)."""
+    keys = account_keys(names)
+    lines = stdout.splitlines()
+    if not keys:
+        return (lines[0] if lines else ""), names[0]
+    key, line = (lines + ["", ""])[:2]
+    return line, keys.get(key, names[0])
+
+
+def pick_closed(found: dict[str, Path], names: list[str]) -> tuple[str, Path, str, str] | None:
+    """List the closed sessions; returns the picked one's workspace label, folder, session id and account."""
     sessions = closed_sessions(Path("~/.claude/projects").expanduser(), open_ids(), cache_file=CACHE)
     if not sessions:
         print("cs: no closed sessions to reopen", file=sys.stderr)
@@ -134,28 +150,55 @@ def pick_closed(found: dict[str, Path]) -> tuple[str, Path, str] | None:
     width = max(len(label) for _, label in rows)
     lines = [f"{i}\t{ago(s.closed_at):>8}  {label:<{width}}  {s.name}" for i, (s, label) in enumerate(rows)]
     done = subprocess.run(["fzf", "--prompt", "reopen ▸ ", "--height", "~100%", "--reverse",
-                           "--delimiter", "\t", "--with-nth", "2..", "--no-sort"],
+                           "--delimiter", "\t", "--with-nth", "2..", "--no-sort", *account_flags(names)],
                           input="\n".join(lines), stdout=subprocess.PIPE, text=True)
-    chosen = done.stdout.strip()
-    if not chosen:
+    line, account = chosen(done.stdout, names)
+    if not line.strip():
         return None
-    session, label = rows[int(chosen.split("\t", 1)[0])]
-    return label, session.cwd, session.session_id
+    session, label = rows[int(line.split("\t", 1)[0])]
+    return label, session.cwd, session.session_id, account
 
 
-def reopen(found: dict[str, Path]) -> int:
+def reopen(found: dict[str, Path], known: dict[str, Path | None]) -> int:
     try:
         ensure_server()
-        picked = pick_closed(found)
+        picked = pick_closed(found, list(known))
         if picked is None:
             return 1
-        label, cwd, session_id = picked
-        open_session(label, cwd, f"claude --resume {session_id}")
-    except RuntimeError as e:
+        label, cwd, session_id, account = picked
+        open_session(label, cwd, accounts.command(account, known[account], f"claude --resume {session_id}"))
+    except (RuntimeError, repos.ConfigError) as e:
         print(f"cs: {e}", file=sys.stderr)
         return 1
     if os.environ.get("HERDR_ENV") != "1":
         show_herdr_window()
+    return 0
+
+
+def switch_session(argv: list[str], account: str | None, found: dict[str, Path],
+                   known: dict[str, Path | None]) -> int:
+    """--switch checks the session and account, then hands the work to a detached --switch-now."""
+    if len(argv) != 2 or account is None:
+        print("cs: usage: cs --switch <session id or name> --as <account>", file=sys.stderr)
+        return 1
+    try:
+        ensure_server()
+        query = argv[1]
+        if query == "here":  # the session of the agent running this, from Claude Code's own env
+            query = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+            if not query:
+                raise RuntimeError("`here` only works from inside a Claude Code session")
+        session = switch.find(query, switch.all_sessions(herdr))
+        if argv[0] == "--switch":
+            accounts.command(account, known[account])  # a missing token fails here, before any pane closes
+            switch.detach(["--switch-now", session.session_id, "--as", account])
+            what = "closing it and reopening" if session.pane_id else "reopening"
+            print(f"cs: {session.name} ({session.session_id}): {what} it on {account}")
+            return 0
+        switch.run(session, place(session.cwd, found), account, known[account], herdr, open_session)
+    except (RuntimeError, repos.ConfigError) as e:
+        print(f"cs: {e}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -164,7 +207,10 @@ def main(argv: list[str], config: Path = repos.CONFIG) -> int:
         print("usage: cs [repo] [--as account]  start Claude in a repo, as a herdr workspace named after it\n"
               "                                 (in the picker, Alt+2… start it on the next accounts)\n"
               "       cs <repo> --run <line>  type <line> at the new tab's prompt instead of claude\n"
-              "       cs --closed  reopen one of the Claude sessions closed most recently\n"
+              "       cs --closed  reopen one of the Claude sessions closed most recently (Alt+2… on another account)\n"
+              "       cs --switch <session> --as <account>  reopen a conversation, open or closed, on that account\n"
+              "                     (<session>: an id, a name, or `here` for the agent's own session)\n"
+              "       cs --sessions  list the sessions --switch knows: id, open or closed, repo, name\n"
               "       cs --accounts  list the accounts in this machine's config")
         return 0
     try:
@@ -177,7 +223,14 @@ def main(argv: list[str], config: Path = repos.CONFIG) -> int:
         print("\n".join(known))
         return 0
     if argv and argv[0] == "--closed":
-        return reopen(found)
+        return reopen(found, known)
+    if argv and argv[0] == "--sessions":
+        try:
+            print(switch.listing(switch.all_sessions(herdr), found))
+        except RuntimeError as e:
+            print(f"cs: {e}", file=sys.stderr)
+            return 1
+        return 0
     account = None
     if "--as" in argv:
         i = argv.index("--as")
@@ -186,6 +239,8 @@ def main(argv: list[str], config: Path = repos.CONFIG) -> int:
             return 1
         account = argv[i + 1]
         argv = argv[:i] + argv[i + 2:]
+    if argv and argv[0] in ("--switch", "--switch-now"):
+        return switch_session(argv, account, found, known)
     # --run lets a desktop action (the Omarchy crash toast) start its own command
     # in a repo's herdr workspace instead of a loose terminal window.
     command = None

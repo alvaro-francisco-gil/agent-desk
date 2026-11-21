@@ -48,7 +48,19 @@ token_file = "~/.config/agent-desk/second.json"
 In the Alt+N picker, Enter starts the session on the `/login` account and Alt+2 on `second`
 (Alt+3 on a third). `cs <repo> --as second` does the same from a shell. The status line shows
 the account's name in magenta after the session name; no name means the `/login` account.
-Settings, history, memory and plugins are shared. Alt+P reopens a session on the `/login` account.
+Settings, history, memory and plugins are shared. In Alt+P, Enter reopens a closed session
+on the `/login` account and Alt+2… on the others.
+
+A conversation keeps the account it started on. To move one, open or closed, to another account:
+
+```sh
+cs --sessions                          # id, open or closed, repo, name
+cs --switch spend-credits --as second  # by name, id or id prefix; `login` is the /login account
+cs --switch here --as second           # from inside a session: an agent moving its own conversation
+```
+
+An open session's tab closes and the conversation comes back, whole, in a new tab of its repo on
+that account. Any agent can run it for any session, its own included.
 
 ## Windows Terminal (SSH into a herdr machine)
 
