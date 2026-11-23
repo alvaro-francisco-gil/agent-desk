@@ -62,6 +62,30 @@ cs --switch here --as second           # from inside a session: an agent moving 
 An open session's tab closes and the conversation comes back, whole, in a new tab of its repo on
 that account. Any agent can run it for any session, its own included.
 
+### Dictation (F9)
+
+Speak instead of typing, in English and Spanish, with
+[voxtype](https://github.com/peteonrails/voxtype) running on the machine itself:
+
+- **F9 held**: talk while it is down; the text is pasted where you are typing.
+- **Alt+F9**: start, and again to stop, for a longer one.
+- **Shift+F9**: copy the last dictation and show it in a notification.
+
+Once, with sudo (Ubuntu 24.04 or later; the `.deb` is on voxtype's releases page):
+
+```sh
+sudo apt install ./voxtype_*_amd64.deb wl-clipboard xclip libnotify-bin libvulkan1
+sudo usermod -aG input $USER     # F9 held: voxtype watches the key itself; log out and in
+sudo voxtype setup gpu --enable  # with a graphics card; without it, the CPU does the work
+```
+
+Then add `-e agent_desk_dictation=true` to the install command (each time you run it).
+It writes `~/.config/voxtype/config.toml` once (your later edits stay), starts voxtype,
+and binds Alt+F9 and Shift+F9 as GNOME custom shortcuts. `voxtype doctor` says what is
+missing when nothing gets typed: on GNOME's Wayland, voxtype types through `dotool` or
+`ydotool`. A smaller model is quicker on the CPU: `-e agent_desk_dictation_model=small`
+on the first install (later, `voxtype config set whisper.model small`).
+
 ## Windows Terminal (SSH into a herdr machine)
 
 Windows Terminal keeps Alt+Enter, Alt+arrows and Alt+Shift+arrows for itself, so herdr
