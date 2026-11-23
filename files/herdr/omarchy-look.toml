@@ -1,0 +1,14 @@
+# herdr's look as Omarchy sets it, for a machine without Omarchy: the terminal's
+# own palette (the Ghostty colours) with blue accents, and single-line dividers.
+[theme]
+name = "terminal"
+
+# The active tab is panel_bg text on the accent, so panel_bg has to be dark to read.
+[theme.custom]
+panel_bg = "reset"
+surface_dim = "black"
+
+[ui]
+accent = "blue"
+pane_gaps = false
+pane_outer_borders = false

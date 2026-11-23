@@ -1,0 +1,68 @@
+# Ghostty as Omarchy sets it up, for a machine without Omarchy: Omarchy's config
+# with its Tokyo Night theme written in, since there is no Omarchy theme to load.
+# tasks/agent_sessions.yml installs it only where no Ghostty config exists yet,
+# and adds the Alt+R line after it.
+
+# Tokyo Night, as Omarchy ships it
+background = #1a1b26
+foreground = #a9b1d6
+cursor-color = #c0caf5
+selection-background = #292e42
+selection-foreground = #c0caf5
+
+palette = 0=#1a1b26
+palette = 1=#f7768e
+palette = 2=#9ece6a
+palette = 3=#e0af68
+palette = 4=#7aa2f7
+palette = 5=#ad8ee6
+palette = 6=#449dab
+palette = 7=#a9b1d6
+palette = 8=#414868
+palette = 9=#ff7a93
+palette = 10=#b9f27c
+palette = 11=#ff9e64
+palette = 12=#7da6ff
+palette = 13=#bb9af7
+palette = 14=#0db9d7
+palette = 15=#c0caf5
+
+# Font. Without the Nerd Font installed, Ghostty falls back to the JetBrains Mono
+# it carries, which has the Nerd Font symbols too, so it looks the same.
+font-family = "JetBrainsMono Nerd Font"
+font-style = Regular
+font-size = 9
+
+# Window
+window-theme = ghostty
+window-padding-x = 14
+window-padding-y = 14
+confirm-close-surface = false
+resize-overlay = never
+gtk-toolbar-style = flat
+
+# Cursor styling
+cursor-style = bar
+cursor-style-blink = false
+
+# Cursor styling + SSH session terminfo
+# (all shell integration options must be passed together)
+shell-integration-features = no-cursor,ssh-env
+
+# Keyboard bindings
+keybind = shift+insert=paste_from_clipboard
+keybind = control+insert=copy_to_clipboard
+# Send Shift+Enter as CSI-u so TUIs can distinguish it from Enter.
+keybind = shift+enter=csi:13;2u
+# Legacy encoding sends Alt+Shift+Enter the same as Alt+Enter; send CSI-u so herdr can match it.
+keybind = alt+shift+enter=csi:13;4u
+keybind = super+control+shift+alt+arrow_down=resize_split:down,100
+keybind = super+control+shift+alt+arrow_up=resize_split:up,100
+keybind = super+control+shift+alt+arrow_left=resize_split:left,100
+keybind = super+control+shift+alt+arrow_right=resize_split:right,100
+
+# Slow touchpad scrolling; mouse wheel keeps Ghostty's default speed
+mouse-scroll-multiplier = precision:0.95,discrete:3
+
+# Right-click pastes the clipboard
+right-click-action = paste
