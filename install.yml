@@ -3,7 +3,8 @@
 #   ansible-playbook -i localhost, -c local install.yml
 # Add -e '{"agent_desk_repos_folders": ["~/work"]}' to have `cs` offer every git
 # repo in those folders; otherwise ~/.config/agent-desk/config.toml must already
-# say where the repos are (agent_desk/repos.py). A machine with its own setup
+# say where the repos are (agent_desk/repos.py). Add -e agent_desk_dictation=true
+# for voxtype dictation (README, "Dictation"). A machine with its own setup
 # play includes tasks/agent_sessions.yml instead.
 - name: Install agent-desk
   hosts: localhost
@@ -15,6 +16,10 @@
   tasks:
     - name: Set up herdr, cs and Claude Code
       ansible.builtin.include_tasks: tasks/agent_sessions.yml
+
+    - name: Set up dictation (F9, Alt+F9, Shift+F9)
+      ansible.builtin.include_tasks: tasks/dictation.yml
+      when: agent_desk_dictation | default(false) | bool
 
     - name: Create the agent-desk config directory
       ansible.builtin.file:

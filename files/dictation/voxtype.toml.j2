@@ -1,0 +1,45 @@
+# Voxtype, written once by agent-desk's tasks/dictation.yml and then yours: the
+# install never replaces it, so words you add under [text] stay. Every key:
+# `voxtype config schema`.
+#
+# F9 held: voxtype hears you while it is down (its own keyboard watcher, which is
+# what lets it see the key go up). Alt+F9 starts and stops a longer one and
+# Shift+F9 copies the last: desktop shortcuts, also set by the install.
+state_file = "auto"
+
+[hotkey]
+enabled = true
+key = "F9"
+mode = "push_to_talk"
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 300
+pause_media = true
+
+[whisper]
+model = "{{ agent_desk_voxtype_model }}"
+# An array, not "en,es": the daemon hands that string to whisper as one unknown language.
+language = {{ agent_desk_voxtype_languages | to_json }}
+translate = false
+# Biases whisper towards these spellings; add the names you say often.
+initial_prompt = "Claude Code, herdr, voxtype, GitHub, repo, PR."
+
+[output]
+# Pastes rather than types: typing dropped capitals. Shift+Insert pastes the
+# clipboard in Chrome and in agent-desk's Ghostty.
+mode = "paste"
+paste_keys = "shift+insert"
+restore_clipboard = true
+fallback_to_clipboard = true
+
+[output.notification]
+on_recording_start = false
+on_recording_stop = false
+on_transcription = false
+
+# Case-insensitive, applied after transcription, when whisper keeps getting a word
+# wrong the same way.
+[text]
+replacements = { "cloud code" = "Claude Code", "cloudcode" = "Claude Code", "vox type" = "voxtype", "heredr" = "herdr" }

@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Copy the last dictation to the clipboard and show it in a notification (Shift+F9).
+
+Voxtype keeps no history file, so this reads its journal, which holds the text before
+voxtype's replacements; they are applied here, so the copy is what voxtype typed. The
+daemon must run with -v: since 1.3 voxtype logs the dictated text only at debug.
+Installed by tasks/dictation.yml.
+"""
+
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+DAYS = 7
+TITLE = "Last dictation"
+TRANSCRIBED = re.compile(r'Transcribed: "(.*)"$')
+# Voxtype 1.3 logs these for every dictation; the text itself only at debug (-v).
+STARTED = re.compile(r"Recording started")
+COUNTED = re.compile(r"Transcribed \d+ chars")
+NO_TEXT = "voxtype logged your last dictation without its text: is the daemon running with -v?"
+
+
+class TextNotLogged(Exception):
+    """The newest dictation was logged by length only, so its text is not in the journal."""
+
+
+def notify(summary: str, body: str = "") -> None:
+    subprocess.run(["notify-send", "-t", "15000", summary, body], check=False)
+
+
+def last_dictation() -> str | None:
+    """The newest transcript in the journal, or None when there is none.
+
+    Raises TextNotLogged when a newer dictation than the last one with text was logged
+    by length only, rather than hand back an older dictation as the last."""
+    done = subprocess.run(
+        ["journalctl", "--user", "-u", "voxtype", "--since", f"{DAYS} days ago",
+         "-o", "cat", "--no-pager"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    counted = False
+    for line in reversed(done.stdout.splitlines()):
+        match = TRANSCRIBED.search(line)
+        if match:
+            return match.group(1)
+        if COUNTED.search(line):
+            counted = True
+        elif STARTED.search(line):
+            if counted:
+                raise TextNotLogged
+            counted = False
+    if counted:
+        raise TextNotLogged
+    return None
+
+
+def replacements(home: Path) -> dict[str, str]:
+    config = home / ".config/voxtype/config.toml"
+    if not config.exists():
+        return {}
+    return tomllib.loads(config.read_text()).get("text", {}).get("replacements", {})
+
+
+def apply_replacements(text: str, found: dict[str, str]) -> str:
+    """What voxtype typed: its journal holds the text before its replacements."""
+    for wrong, right in found.items():
+        text = re.sub(rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE)
+    return text
+
+
+def copy(text: str) -> None:
+    """wl-copy on Wayland, xclip on X11 (a GNOME session can be either)."""
+    if os.environ.get("WAYLAND_DISPLAY"):
+        argv = ["wl-copy"]
+    else:
+        argv = ["xclip", "-selection", "clipboard"]
+    subprocess.run(argv, input=text, text=True, check=True)
+
+
+def main() -> int:
+    try:
+        said = last_dictation()
+    except (OSError, subprocess.CalledProcessError):
+        notify(TITLE, "Could not read voxtype's log")
+        return 1
+    except TextNotLogged:
+        notify(TITLE, NO_TEXT)
+        return 1
+    if said is None:
+        notify(TITLE, f"Nothing dictated in the last {DAYS} days")
+        return 0
+    text = apply_replacements(said, replacements(Path.home()))
+    try:
+        copy(text)
+    except (OSError, subprocess.CalledProcessError):
+        notify(f"{TITLE} (not copied)", text)
+        return 1
+    notify(f"{TITLE} (copied)", text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

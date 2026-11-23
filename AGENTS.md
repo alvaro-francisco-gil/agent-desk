@@ -22,6 +22,8 @@ Machines take it with `git pull`; only the owner pushes.
 
 - `install.yml` installs on this machine; `tasks/agent_sessions.yml` is the work, also
   included by a machine's own setup play (variables `agent_desk_home`, `agent_desk_dir`).
+- `tasks/dictation.yml` + `files/dictation/`: voxtype dictation on F9 (opt-in,
+  `agent_desk_dictation`), skipped on Omarchy, which has its own.
 - `files/` what the tasks install: herdr helpers and paused-agents plugin, Claude Code
   status line, keybindings and secret-file denies.
 - `bin/cs` + `agent_desk/`: the repo picker (`cs`, `cs --closed`).

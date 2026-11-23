@@ -1,0 +1,116 @@
+---
+# Dictation with voxtype, the same keys as on the Omarchy workstation:
+#   F9 held   talk while it is down (voxtype's own keyboard watcher)
+#   Alt+F9    start, and again to stop, for a longer one
+#   Shift+F9  copy the last dictation and show it
+# Run by install.yml when agent_desk_dictation is true; tests/test_dictation.py
+# runs it alone. Needs agent_desk_home and agent_desk_dir. The root steps (the
+# voxtype package, the input group, the GPU switch) are the README's, done once.
+# Omarchy has its own dictation setup, so nothing here runs there.
+
+- name: Check whether this is Omarchy
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.local/share/omarchy"
+  register: agent_desk_dictation_omarchy
+
+- name: Set up dictation
+  when: not agent_desk_dictation_omarchy.stat.exists
+  vars:
+    # The model is the Omarchy one; a GPU (`voxtype setup gpu`) makes it quick, and
+    # voxtype falls back to the CPU when the GPU isn't there. -e overrides either.
+    agent_desk_voxtype_model: "{{ agent_desk_dictation_model | default('large-v3-turbo') }}"
+    agent_desk_voxtype_languages: "{{ agent_desk_dictation_languages | default(['en', 'es']) }}"
+  block:
+    - name: Find voxtype
+      ansible.builtin.command:
+        argv: [sh, -c, command -v voxtype]
+      register: agent_desk_voxtype
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Fail when voxtype is missing
+      ansible.builtin.fail:
+        msg: >-
+          voxtype is not installed: install its .deb first (README, "Dictation"),
+          then re-run.
+      when: agent_desk_voxtype.rc != 0
+
+    - name: Create the voxtype, service override and ~/.local/bin directories
+      ansible.builtin.file:
+        path: "{{ agent_desk_home }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - .config/voxtype
+        - .config/systemd/user/voxtype.service.d
+        - .local/bin
+
+    # Written once: the words you add later stay.
+    - name: Write the voxtype config
+      ansible.builtin.template:
+        src: "{{ agent_desk_dir }}/files/dictation/voxtype.toml.j2"
+        dest: "{{ agent_desk_home }}/.config/voxtype/config.toml"
+        mode: "0644"
+        force: false
+      register: agent_desk_voxtype_config
+
+    - name: Log the dictated text, for Shift+F9
+      ansible.builtin.copy:
+        src: "{{ agent_desk_dir }}/files/dictation/verbose.conf"
+        dest: "{{ agent_desk_home }}/.config/systemd/user/voxtype.service.d/agent-desk.conf"
+        mode: "0644"
+      register: agent_desk_voxtype_override
+
+    - name: Download the voxtype model
+      ansible.builtin.command:
+        argv: [voxtype, setup, --download, --model, "{{ agent_desk_voxtype_model }}", --quiet, --no-post-install]
+        creates: "{{ agent_desk_home }}/.local/share/voxtype/models/ggml-{{ agent_desk_voxtype_model }}.bin"
+      register: agent_desk_voxtype_downloaded
+
+    - name: Install the voxtype service
+      ansible.builtin.command:
+        argv: [voxtype, setup, systemd]
+        creates: "{{ agent_desk_home }}/.config/systemd/user/voxtype.service"
+      register: agent_desk_voxtype_service
+
+    - name: Restart voxtype on what changed
+      ansible.builtin.shell: systemctl --user daemon-reload && systemctl --user enable --now voxtype && systemctl --user restart voxtype
+      changed_when: true
+      when: >-
+        agent_desk_voxtype_config is changed or agent_desk_voxtype_override is changed
+        or agent_desk_voxtype_downloaded is changed or agent_desk_voxtype_service is changed
+
+    - name: Install voxtype-last (Shift+F9)
+      ansible.builtin.copy:
+        src: "{{ agent_desk_dir }}/files/dictation/voxtype-last"
+        dest: "{{ agent_desk_home }}/.local/bin/voxtype-last"
+        mode: "0755"
+
+    - name: Check for GNOME's shortcut settings
+      ansible.builtin.command:
+        argv: [gsettings, list-keys, org.gnome.settings-daemon.plugins.media-keys]
+      register: agent_desk_gnome
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Bind Alt+F9 and Shift+F9 in GNOME
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ agent_desk_dir }}/files/dictation/gnome-shortcuts.py"
+          - "{{ agent_desk_gnome_shortcuts | to_json }}"
+      register: agent_desk_gnome_bound
+      changed_when: agent_desk_gnome_bound.stdout == 'changed'
+      when: agent_desk_gnome.rc == 0
+      vars:
+        agent_desk_gnome_shortcuts:
+          - id: agent-desk-dictation-toggle
+            name: Dictation on/off
+            command: voxtype record toggle
+            binding: <Alt>F9
+          - id: agent-desk-dictation-last
+            name: Copy last dictation
+            command: "{{ agent_desk_home }}/.local/bin/voxtype-last"
+            binding: <Shift>F9
