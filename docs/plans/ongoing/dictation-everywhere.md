@@ -33,3 +33,15 @@ copy the last dictation, English and Spanish.
 3. Windows: prototype with Handy; a `dictation.ps1` here if it holds up.
 4. The Omarchy workstation's own setup uses `files/dictation/voxtype-last` from here
    instead of its copy, so the two stay one.
+
+## Ubuntu findings (2026-11-23, Ubuntu 26.04 GNOME, Intel Iris Xe)
+
+- Install with `-e agent_desk_dictation=true` ran clean; model downloaded, service active.
+- `voxtype doctor` before ydotool: "No text output method available for mode 'paste'"
+  (wtype doesn't work on GNOME) and no readable input device. Fixed by `ydotool` from
+  apt (ships the `/dev/uinput` rule and a `ydotool` user service) plus the `input` group.
+- With lingering on, logging out doesn't refresh the user services' groups: `ydotoold`
+  exits with status 2 until a reboot. README now says reboot.
+- Still to check after the reboot: doctor clean, F9 held pastes in Ghostty and Chrome,
+  Alt+F9, Shift+F9 without a stray recording, speed on the GPU. If voxtype's paste mode
+  doesn't use ydotool, the playbook may need to set the output driver.

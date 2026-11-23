@@ -85,19 +85,31 @@ Speak instead of typing, in English and Spanish, with
 - **Alt+F9**: start, and again to stop, for a longer one.
 - **Shift+F9**: copy the last dictation and show it in a notification.
 
-Once, with sudo (Ubuntu 24.04 or later; the `.deb` is on voxtype's releases page):
+Once, with sudo (Ubuntu 24.04 or later). Download the `.deb` from voxtype's
+[releases page](https://github.com/peteonrails/voxtype/releases) into a folder of its own
+(about 500 MB), then:
 
 ```sh
-sudo apt install ./voxtype_*_amd64.deb wl-clipboard xclip libnotify-bin libvulkan1
-sudo usermod -aG input $USER     # F9 held: voxtype watches the key itself; log out and in
+sudo apt install ~/Downloads/voxtype/voxtype_*_amd64.deb wl-clipboard xclip libnotify-bin libvulkan1 ydotool
+sudo usermod -aG input $USER     # F9 held: voxtype watches the key itself
 sudo voxtype setup gpu --enable  # with a graphics card; without it, the CPU does the work
 ```
 
+Then **reboot**. Logging out isn't enough when your user services linger
+(`loginctl show-user $USER -p Linger`): voxtype and ydotool keep running without the new
+`input` group, so F9 isn't seen and nothing gets pasted.
+
+`ydotool` is how the text arrives on GNOME: voxtype copies the text and presses
+Shift+Insert, and GNOME's Wayland doesn't let `wtype` (which voxtype ships with) press
+keys. The Ubuntu package brings the `/dev/uinput` rule for the `input` group and a user
+service, `ydotool`, that starts at login. A `.deb` path with a `*` that matches nothing
+fails with "Unsupported file", so check the download landed first.
+
 Then add `-e agent_desk_dictation=true` to the install command (each time you run it).
-It writes `~/.config/voxtype/config.toml` once (your later edits stay), starts voxtype,
-and binds Alt+F9 and Shift+F9 as GNOME custom shortcuts. `voxtype doctor` says what is
-missing when nothing gets typed: on GNOME's Wayland, voxtype types through `dotool` or
-`ydotool`. A smaller model is quicker on the CPU: `-e agent_desk_dictation_model=small`
+It writes `~/.config/voxtype/config.toml` once (your later edits stay), downloads the
+model, starts voxtype, and binds Alt+F9 and Shift+F9 as GNOME custom shortcuts.
+`voxtype doctor` says what is missing when nothing gets typed. A smaller model is quicker
+on the CPU: `-e agent_desk_dictation_model=small`
 on the first install (later, `voxtype config set whisper.model small`).
 
 ## Windows Terminal (SSH into a herdr machine)
