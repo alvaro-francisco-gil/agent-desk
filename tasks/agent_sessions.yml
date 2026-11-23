@@ -35,6 +35,46 @@
     mode: "0644"
     force: false
 
+# Omarchy installs Ghostty, writes its config and themes it and herdr; a machine
+# without it gets the same look from files/ghostty/config and
+# files/herdr/omarchy-look.toml, frozen at Omarchy's Tokyo Night. Omarchy's own
+# files are never touched.
+- name: Check whether this is an Omarchy machine
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ agent_desk_omarchy_paths | default([agent_desk_home ~ '/.config/omarchy', agent_desk_home ~ '/.local/share/omarchy', '/usr/share/omarchy']) }}"
+  register: agent_desk_omarchy_markers
+
+- name: Note whether this is an Omarchy machine
+  ansible.builtin.set_fact:
+    agent_desk_omarchy: "{{ agent_desk_omarchy_markers.results | selectattr('stat.exists') | list | length > 0 }}"
+
+# Needs sudo, so only on request: -e agent_desk_install_ghostty=true (Ubuntu, snap).
+- name: Install Ghostty
+  ansible.builtin.command:
+    argv: [snap, install, ghostty, --classic]
+    creates: /snap/bin/ghostty
+  become: true
+  when:
+    - agent_desk_install_ghostty | default(false) | bool
+    - not agent_desk_omarchy | bool
+
+- name: Create the Ghostty config directory
+  ansible.builtin.file:
+    path: "{{ agent_desk_home }}/.config/ghostty"
+    state: directory
+    mode: "0755"
+  when: not agent_desk_omarchy | bool
+
+# Before the Alt+R task, so a fresh machine gets Alt+R in the same run.
+- name: Give Ghostty Omarchy's look where it has no config yet
+  ansible.builtin.copy:
+    src: "{{ agent_desk_dir }}/files/ghostty/config"
+    dest: "{{ agent_desk_home }}/.config/ghostty/config"
+    mode: "0644"
+    force: false
+  when: not agent_desk_omarchy | bool
+
 # Alt+R types `/rename ` into the prompt for a name to follow. Claude's own
 # keybindings can only run /rename bare, which picks a name itself, so the
 # terminal types it: ghostty runs the herdr window, foot the others. Omarchy
@@ -125,6 +165,39 @@
       model: opus
       modelSettings: { claude-opus-5-5: { effortLevel: medium } }
 
+# Read before anything below writes the herdr config, for the look task.
+- name: Check for a herdr config of its own
+  ansible.builtin.stat:
+    path: "{{ agent_desk_home }}/.config/herdr/config.toml"
+  register: agent_desk_herdr_config_before
+  when: not agent_desk_omarchy | bool
+
+- name: Read the herdr config before any change
+  ansible.builtin.slurp:
+    src: "{{ agent_desk_home }}/.config/herdr/config.toml"
+  register: agent_desk_herdr_config_before_text
+  when: not (agent_desk_omarchy | bool) and agent_desk_herdr_config_before.stat.exists
+
+# Only while the config has no [theme] of its own, so a chosen theme stays.
+# merge-tables.py sets keys in place; check mode runs it too, writing nothing.
+- name: Give herdr Omarchy's look where it has no theme yet
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/herdr/merge-tables.py') }}"
+      - "{{ agent_desk_home }}/.config/herdr/config.toml"
+      - "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/herdr/omarchy-look.toml') }}"
+      - "{{ '--check' if ansible_check_mode else '--apply' }}"
+  register: agent_desk_herdr_look
+  changed_when: agent_desk_herdr_look.stdout == 'changed'
+  check_mode: false
+  when: >-
+    not (agent_desk_omarchy | bool)
+    and not (agent_desk_herdr_config_before.stat.exists
+             and agent_desk_herdr_config_before_text.content | b64decode
+                 is search('(?m)^\s*\[\s*theme\s*\]'))
+
 # Sets the keys inside the tables herdr's config may already declare, so no
 # table is declared twice; check mode runs it too, writing nothing.
 - name: Silence notifications and add session names to the herdr config
@@ -188,6 +261,27 @@
     # The agent key in any TOML spelling: bare, indented or quoted.
     - not (agent_desk_herdr_config_text.content | b64decode
            is search('(?m)^\s*(["\']?)' ~ item.agent ~ '\\1\s*='))
+
+# A config Omarchy didn't write has no Alt+arrow lines for the task above to
+# move: bind both agent keys while neither is set and Alt+Up/Down are free.
+- name: Bind Alt+Up/Down to the agents where nothing holds them
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "{{ lookup('ansible.builtin.file', agent_desk_dir ~ '/files/herdr/merge-tables.py') }}"
+      - "{{ agent_desk_home }}/.config/herdr/config.toml"
+      - "[keys]\nprevious_agent = \"alt+up\"\nnext_agent = \"alt+down\""
+      - "{{ '--check' if ansible_check_mode else '--apply' }}"
+  register: agent_desk_herdr_agent_keys
+  changed_when: agent_desk_herdr_agent_keys.stdout == 'changed'
+  check_mode: false
+  when:
+    - agent_desk_herdr_config.stat.exists
+    - not (agent_desk_herdr_config_text.content | b64decode
+           is search('(?m)^\s*(["\']?)(previous|next)_agent\\1\s*='))
+    - not (agent_desk_herdr_config_text.content | b64decode
+           is search('["\']alt\+(up|down)["\']'))
 
 - name: Put cs on PATH
   ansible.builtin.file:

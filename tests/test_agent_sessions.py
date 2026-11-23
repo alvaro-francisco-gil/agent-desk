@@ -62,7 +62,8 @@ def _need(*tools):
 @pytest.fixture
 def home(tmp_path):
     home = tmp_path / "home"
-    (home / ".config").mkdir(parents=True)
+    # An Omarchy machine unless a test removes the marker; _play looks for it only in home.
+    (home / ".config" / "omarchy").mkdir(parents=True)
     (home / ".bashrc").write_text("# mine\n")
     stubs = tmp_path / "bin"
     stubs.mkdir()
@@ -77,7 +78,8 @@ def _play(home: Path, *extra: str) -> dict:
     play = home.parent / "play.yml"
     play.write_text(
         "- hosts: localhost\n  connection: local\n  gather_facts: false\n"
-        f"  vars: {{agent_desk_home: '{home}', agent_desk_dir: '{REPO}'}}\n"
+        f"  vars: {{agent_desk_home: '{home}', agent_desk_dir: '{REPO}',"
+        f" agent_desk_omarchy_paths: ['{home}/.config/omarchy']}}\n"
         f"  tasks:\n    - ansible.builtin.include_tasks: '{TASKS}'\n"
     )
     env = dict(
@@ -544,6 +546,91 @@ def test_missing_terminal_configs_are_skipped(home):
     _play(home)
     assert not (home / ".config" / "foot").exists()
     assert not (home / ".config" / "ghostty").exists()
+
+
+# ── A machine without Omarchy ──────────────────────────────────────────────
+
+LOOK = {
+    "theme": {"name": "terminal", "custom": {"panel_bg": "reset", "surface_dim": "black"}},
+    "accent": "blue",
+    "pane_gaps": False,
+    "pane_outer_borders": False,
+}
+
+
+def _look(config: Path) -> dict:
+    herdr = tomllib.loads(config.read_text())
+    ui = herdr.get("ui", {})
+    return {"theme": herdr.get("theme"), **{k: ui.get(k) for k in LOOK if k != "theme"}}
+
+
+def test_a_machine_without_omarchy_gets_its_look_ghostty_and_alt_r(home):
+    (home / ".config" / "omarchy").rmdir()
+    _play(home)
+    ghostty = (home / ".config" / "ghostty" / "config").read_text()
+    assert ghostty == (FILES / "ghostty" / "config").read_text() + GHOSTTY_RENAME + "\n"
+    config = home / ".config" / "herdr" / "config.toml"
+    assert _look(config) == LOOK
+    herdr = tomllib.loads(config.read_text())
+    assert herdr["ui"]["toast"]["delivery"] == "off"
+    assert herdr["keys"]["previous_agent"] == "alt+up"
+    assert herdr["keys"]["next_agent"] == "alt+down"
+    assert _play(home)["changed"] == 0
+
+
+def test_check_mode_without_omarchy_writes_nothing(home):
+    (home / ".config" / "omarchy").rmdir()
+    _play(home, "--check")
+    assert not (home / ".config" / "ghostty").exists()
+    assert not (home / ".config" / "herdr").exists()
+
+
+def test_own_ghostty_config_and_herdr_theme_are_kept_without_omarchy(home):
+    (home / ".config" / "omarchy").rmdir()
+    _, ghostty_config = _terminals(home)
+    (home / ".config" / "herdr").mkdir()
+    config = home / ".config" / "herdr" / "config.toml"
+    config.write_text('[theme]\nname = "mine"\n')
+    _play(home)
+    assert ghostty_config.read_text().splitlines() == [GHOSTTY.strip(), GHOSTTY_RENAME]
+    assert _look(config) == {
+        "theme": {"name": "mine"},
+        "accent": None,
+        "pane_gaps": None,
+        "pane_outer_borders": None,
+    }
+    assert _play(home)["changed"] == 0
+
+
+def test_an_omarchy_machine_gets_no_ghostty_config_or_look(home):
+    (home / ".config" / "herdr").mkdir()
+    config = home / ".config" / "herdr" / "config.toml"
+    config.write_text(OMARCHY_KEYS)
+    _play(home)
+    assert not (home / ".config" / "ghostty").exists()
+    assert "theme" not in tomllib.loads(config.read_text())
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        ("", {"previous_agent": "alt+up", "next_agent": "alt+down"}),
+        ('[keys]\nprefix = "ctrl+space"\n', {"previous_agent": "alt+up", "next_agent": "alt+down"}),
+        ('[keys]\nprevious_agent = "alt+k"\n', {"previous_agent": "alt+k", "next_agent": None}),
+        ('[keys]\nzoom = "alt+up"\n', {"previous_agent": None, "next_agent": None}),
+        ("[keys]\nzoom = 'alt+down'\n", {"previous_agent": None, "next_agent": None}),
+    ],
+    ids=["no-config", "keys-table", "one-agent-key-set", "alt-up-taken", "alt-down-taken"],
+)
+def test_alt_up_down_reach_the_agents_only_where_free(home, existing, expected):
+    config = home / ".config" / "herdr" / "config.toml"
+    if existing:
+        config.parent.mkdir()
+        config.write_text(existing)
+    _play(home)
+    keys = tomllib.loads(config.read_text())["keys"]
+    assert {key: keys.get(key) for key in expected} == expected
+    assert _play(home)["changed"] == 0
 
 
 # ── Alt+Enter terminal and /rename ─────────────────────────────────────────

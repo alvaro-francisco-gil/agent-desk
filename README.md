@@ -17,7 +17,9 @@ curl -fsSL https://herdr.dev/install.sh | sh
 ```
 
 [Ghostty](https://ghostty.org) is optional: with it, Alt+R types `/rename `, and `cs`
-opens herdr in it. Then:
+opens herdr in it. On Ubuntu, `sudo snap install ghostty --classic`, or add
+`-e agent_desk_install_ghostty=true` to the install command below to have it do that
+(it asks for your password: add `-K`). Then:
 
 ```sh
 git clone https://github.com/alvaro-francisco-gil/agent-desk ~/agent-desk
@@ -32,6 +34,18 @@ What you get in herdr: Alt+N starts Claude in a repo, Alt+P reopens a closed ses
 Alt+S parks an agent in a paused list, Alt+W closes a tab and lands on the next active
 agent, Alt+Enter opens a shell, Alt+Up/Down move between agents. Alt+R types `/rename `
 in Ghostty and foot. Claude Code gets a status line and settings defaults.
+
+### The Omarchy look elsewhere
+
+On a machine without [Omarchy](https://omarchy.org), the install gives Ghostty and herdr
+the look they have on Omarchy: Ghostty's config, with the Tokyo Night colours written in
+(`files/ghostty/config`), and herdr's theme on the terminal's palette with blue accents
+(`files/herdr/omarchy-look.toml`). The colours are fixed; Omarchy's theme switching stays
+on Omarchy. A Ghostty config that already exists, or a herdr config with a `[theme]` of its
+own, is left alone, and on Omarchy nothing of this is written. The font is JetBrainsMono
+Nerd Font; without it Ghostty uses the JetBrains Mono it carries, which looks the same.
+Font size 9 suits a high-density screen; raise `font-size` in `~/.config/ghostty/config`
+if it reads small.
 
 ### A second Claude account
 
@@ -91,3 +105,8 @@ takes over Windows voice typing. Everything carries a sheep icon.
 
 `sheep.ico` is the 🐑 from [Twemoji](https://github.com/jdecked/twemoji), © Twitter and
 contributors, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+`files/ghostty/config` and `files/herdr/omarchy-look.toml` follow
+[Omarchy](https://github.com/omacom/omarchy)'s configs, © David Heinemeier Hansson,
+[MIT](https://opensource.org/license/mit). Its Tokyo Night palette comes from
+[Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme) by enkia, MIT.
