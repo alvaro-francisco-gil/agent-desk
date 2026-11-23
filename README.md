@@ -8,11 +8,11 @@ works on is a file on that machine.
 
 ## Install on Linux
 
-Needs [herdr](https://herdr.dev), Claude Code, Python 3.11+, `fzf`, `jq` and
-`ansible-core`. On Ubuntu:
+Needs [herdr](https://herdr.dev), Claude Code, Python 3.11+, `fzf`, `jq`,
+`wl-clipboard` and `ansible-core`. On Ubuntu:
 
 ```sh
-sudo apt install fzf jq pipx && pipx install ansible-core && pipx ensurepath
+sudo apt install fzf jq wl-clipboard pipx && pipx install ansible-core && pipx ensurepath
 curl -fsSL https://herdr.dev/install.sh | sh
 ```
 
