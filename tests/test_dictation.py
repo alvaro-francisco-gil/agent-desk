@@ -186,7 +186,7 @@ def test_without_voxtype_it_says_how(home):
     (stubs / "voxtype").unlink()
     for folder in os.environ["PATH"].split(":"):
         for tool in Path(folder).glob("*") if Path(folder).is_dir() else ():
-            if tool.name != "voxtype" and not (stubs / tool.name).exists():
+            if tool.name != "voxtype" and not os.path.lexists(stubs / tool.name):
                 (stubs / tool.name).symlink_to(tool)
     out = _play(home, env={"PATH": str(stubs)}, ok=False)
     assert "voxtype is not installed" in out
