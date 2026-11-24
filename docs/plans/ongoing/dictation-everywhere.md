@@ -68,3 +68,40 @@ copy the last dictation, English and Spanish.
 - [ ] Decide the default engine: Parakeet where a dedicated GPU exists, or keep whisper
       and point it at the right GPU.
 
+- **Shortcuts never reached GNOME (bug).** With Homebrew installed, `gsettings` on PATH
+  is Homebrew's (`/home/linuxbrew/.linuxbrew/bin/gsettings`), whose glib has no dconf
+  module: it falls back to `~/.config/glib-2.0/settings/keyfile`, which GNOME never
+  reads, and reading back with the same binary shows the shortcuts as set. Alt+F9,
+  Shift+F9 (and a hand-made Super+C) were dead until rewritten with `/usr/bin/gsettings`.
+  Fix: `gnome-shortcuts.py` and the `list-keys` check in `tasks/dictation.yml` call
+  `/usr/bin/gsettings` (or check `G_MESSAGES_DEBUG=all gsettings ...` picks
+  `GDconfSettingsBackend`); add a test with a fake `gsettings` earlier on PATH.
+- **Alt+F9 vs the F9 watcher (bug).** voxtype's evdev watcher sees Alt+F9 as F9: it
+  starts a recording on the press and stops it on the release, so `voxtype record
+  toggle` from GNOME is ignored ("daemon is Recording") and the release ends it. Worked
+  around here with a helper bound to Alt+F9:
+
+  ```bash
+  #!/usr/bin/env bash
+  # Alt+F9: start dictation, stop it on the next press, around the F9 watcher's blip.
+  set -u
+  flag="${XDG_RUNTIME_DIR:-/tmp}/voxtype-toggle.on"
+  wait_not_recording() {
+    for _ in $(seq 40); do
+      [ "$(voxtype status 2>/dev/null)" = recording ] || return 0
+      sleep 0.05
+    done
+  }
+  if [ -e "$flag" ]; then
+    rm -f "$flag"
+    sleep 0.4
+    [ "$(voxtype status 2>/dev/null)" = recording ] && voxtype record stop
+  else
+    sleep 0.3
+    wait_not_recording
+    voxtype record start && touch "$flag"
+  fi
+  ```
+
+  Ship it as `files/dictation/voxtype-toggle` (or drop Alt+F9 if Omarchy doesn't have
+  the same clash). Shift+F9 has the same blip but it is harmless (0.2 s, ignored).
