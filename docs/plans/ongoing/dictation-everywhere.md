@@ -42,6 +42,8 @@ copy the last dictation, English and Spanish.
   apt (ships the `/dev/uinput` rule and a `ydotool` user service) plus the `input` group.
 - With lingering on, logging out doesn't refresh the user services' groups: `ydotoold`
   exits with status 2 until a reboot. README now says reboot.
-- Still to check after the reboot: doctor clean, F9 held pastes in Ghostty and Chrome,
-  Alt+F9, Shift+F9 without a stray recording, speed on the GPU. If voxtype's paste mode
-  doesn't use ydotool, the playbook may need to set the output driver.
+- After the reboot (2026-11-24): `voxtype doctor` all green (24 of 24 input devices,
+  output method paste, Vulkan GPU), and the journal shows the paste going through
+  ydotool (`Paste keystroke sent via ydotool`, Shift+Insert). No playbook change needed.
+- Still to check by hand: F9 held in Ghostty and Chrome, Alt+F9, Shift+F9 without a
+  stray recording, speed on the GPU.
