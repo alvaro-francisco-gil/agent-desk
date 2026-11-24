@@ -103,5 +103,6 @@ copy the last dictation, English and Spanish.
   fi
   ```
 
-  Ship it as `files/dictation/voxtype-toggle` (or drop Alt+F9 if Omarchy doesn't have
+  Verified by hand on Ubuntu (2026-11-24): F9 held, Alt+F9 start/stop and Shift+F9 all
+  work. Ship it as `files/dictation/voxtype-toggle` (or drop Alt+F9 if Omarchy doesn't have
   the same clash). Shift+F9 has the same blip but it is harmless (0.2 s, ignored).
