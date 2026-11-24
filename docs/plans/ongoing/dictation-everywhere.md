@@ -47,3 +47,24 @@ copy the last dictation, English and Spanish.
   ydotool (`Paste keystroke sent via ydotool`, Shift+Insert). No playbook change needed.
 - Still to check by hand: F9 held in Ghostty and Chrome, Alt+F9, Shift+F9 without a
   stray recording, speed on the GPU.
+- **Speed (2026-11-24).** This laptop has Intel Iris Xe and an NVIDIA RTX 3050 Ti.
+  Whisper large-v3-turbo ran on the Intel one (Vulkan0) and reloaded per dictation:
+  7.6 s of audio took 10 s, 2.5 s took 18.7 s. Switched to Parakeet
+  (`parakeet-tdt-0.6b-v3-Q8_0.gguf`, English and Spanish): it loads once on the NVIDIA
+  card (Vulkan1) in 1.1 s, and 35.7 s of audio took 8.7 s. Candidate default for a
+  machine with a dedicated GPU; check what the Omarchy workstation uses and how fast.
+- **Words.** Parakeet ignores `whisper.initial_prompt`; only `[text] replacements` apply
+  (`voxtype history rule "<heard>" "<meant>"` adds one). Added here: "homear key",
+  "homarchy", "omar key" -> "Omarchy".
+- **Popup.** Omarchy's voxtype popup is the Quickshell frontend; Ubuntu has no
+  Quickshell package and GNOME lacks layer-shell, so Ubuntu keeps the gtk4 popup.
+
+## Next, on the Omarchy workstation
+
+- [ ] Compare its voxtype engine, model and `[text] replacements` with
+      `files/dictation/voxtype.toml.j2`. Move the general words (tool and product names)
+      into the template, so every machine gets them; personal ones stay in that machine's
+      config and the owner copies them across by hand.
+- [ ] Decide the default engine: Parakeet where a dedicated GPU exists, or keep whisper
+      and point it at the right GPU.
+
