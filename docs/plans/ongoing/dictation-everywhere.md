@@ -106,3 +106,13 @@ copy the last dictation, English and Spanish.
   Verified by hand on Ubuntu (2026-11-24): F9 held, Alt+F9 start/stop and Shift+F9 all
   work. Ship it as `files/dictation/voxtype-toggle` (or drop Alt+F9 if Omarchy doesn't have
   the same clash). Shift+F9 has the same blip but it is harmless (0.2 s, ignored).
+- **NVIDIA card fell off the bus (2026-11-25).** After a day of use, a 33 s Parakeet
+  dictation on the RTX 3050 Ti hit `ErrorOutOfDeviceMemory`, then kernel Xid 79 "GPU has
+  fallen off the bus" (laptop dGPU failing to wake from runtime power saving; needs a
+  reboot). The gguf worker crashed and the daemon stayed in `transcribing` forever, so
+  every F9 press was ignored. Worked around here with a guard (owner wants the GPU, CPU
+  only as fallback): `voxtype-gpu-guard pick` as `ExecStartPre` of voxtype sets
+  `parakeet.gguf_backend` to `auto` when `nvidia-smi -L` answers, else `cpu`; a
+  `voxtype-gpu-guard.service` loop switches to `cpu`, restarts voxtype and notifies when
+  a transcription runs over 30 s or the card stops answering. Candidate for the playbook
+  wherever the default model runs on a dedicated GPU.
