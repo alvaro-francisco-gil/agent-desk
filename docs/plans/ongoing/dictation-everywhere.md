@@ -2,7 +2,7 @@
 
 **Goal:** the Omarchy workstation's dictation keys work the same on a stock Ubuntu
 GNOME machine and on Windows: F9 held to talk, Alt+F9 to start and stop, Shift+F9 to
-copy the last dictation, English and Spanish.
+paste the last dictation again, English and Spanish.
 
 ## Decided (owner, 2026-11-23)
 

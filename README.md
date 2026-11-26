@@ -83,7 +83,7 @@ Speak instead of typing, in English and Spanish, with
 
 - **F9 held**: talk while it is down; the text is pasted where you are typing.
 - **Alt+F9**: start, and again to stop, for a longer one.
-- **Shift+F9**: copy the last dictation and show it in a notification.
+- **Shift+F9**: paste the last dictation again where you are typing; your clipboard is kept.
 
 Once, with sudo (Ubuntu 24.04 or later). Download the `.deb` from voxtype's
 [releases page](https://github.com/peteonrails/voxtype/releases) into a folder of its own
@@ -108,6 +108,7 @@ fails with "Unsupported file", so check the download landed first.
 Then add `-e agent_desk_dictation=true` to the install command (each time you run it).
 It writes `~/.config/voxtype/config.toml` once (your later edits stay), downloads the
 model, starts voxtype, and binds Alt+F9 and Shift+F9 as GNOME custom shortcuts.
+Shift+F9 presses Shift+Insert through `ydotool` too.
 `voxtype doctor` says what is missing when nothing gets typed. A smaller model is quicker
 on the CPU: `-e agent_desk_dictation_model=small`
 on the first install (later, `voxtype config set whisper.model small`).
