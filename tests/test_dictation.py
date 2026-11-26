@@ -242,9 +242,42 @@ def test_shortcuts_update_in_place(tmp_path):
 # voxtype-last (Shift+F9)
 
 
-def _last(tmp_path, journal, journal_status=0, copy_status=0, replacements=None, wayland=True):
-    """Press Shift+F9 with stubs; returns the result, what was copied (None if nothing
-    was) and what was notified."""
+# Each stub logs its name, arguments and input; the clipboard stubs keep one clipboard.
+CLIP_STUB = """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+here = Path(os.environ["STUB_DIR"])
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+given = "" if sys.stdin.isatty() or name in ("wl-paste",) or "-o" in args else sys.stdin.read()
+with open(here / "calls", "a") as log:
+    log.write(json.dumps([name, args, given]) + "\\n")
+held = json.loads((here / "held").read_text()) if (here / "held").exists() else None
+fail = json.loads((here / "fail").read_text())
+if name in fail:
+    sys.exit(1)
+if name == "wl-paste" or (name == "xclip" and "-o" in args):
+    if held is None:
+        sys.exit(1)
+    if "--list-types" in args or "TARGETS" in args:
+        print("\\n".join(held))
+    else:
+        sys.stdout.write(held[args[-1]])
+elif name in ("wl-copy", "xclip"):
+    if "--clear" in args:
+        (here / "held").unlink(missing_ok=True)
+    else:
+        kind = args[args.index("--type" if name == "wl-copy" else "-t") + 1] if (
+            "--type" in args or "-t" in args) else "text/plain;charset=utf-8"
+        (here / "held").write_text(json.dumps({kind: given}))
+"""
+PASTERS = ("wtype", "dotool", "ydotool", "xdotool")
+
+
+def _last(tmp_path, journal, journal_status=0, fail=(), held=None, replacements=None,
+          wayland=True):
+    """Press Shift+F9 with stubs, the clipboard holding `held` ({type: text}) and the
+    stubs in `fail` failing; returns the result, the stubs' calls as (name, args,
+    input), what the clipboard holds after, and what was notified."""
     home, stubs = tmp_path / "home", tmp_path / "stubs"
     shutil.rmtree(home, ignore_errors=True)
     shutil.rmtree(stubs, ignore_errors=True)
@@ -256,22 +289,38 @@ def _last(tmp_path, journal, journal_status=0, copy_status=0, replacements=None,
             f"[text]\nreplacements = {replacements}\n"
         )
     (tmp_path / "journal").write_text(journal)
-    copied, notified = tmp_path / "copied", tmp_path / "notified"
-    copied.unlink(missing_ok=True)
+    notified = tmp_path / "notified"
     notified.write_text("")
+    (stubs / "fail").write_text(json.dumps(list(fail)))
+    if held is not None:
+        (stubs / "held").write_text(json.dumps(held))
     (stubs / "journalctl").write_text(f"#!/bin/bash\ncat {tmp_path / 'journal'}\nexit {journal_status}\n")
-    clip = f"#!/bin/bash\necho \"$0 $*\" > {tmp_path / 'clip'}\ncat > {copied}\nexit {copy_status}\n"
-    (stubs / "wl-copy").write_text(clip)
-    (stubs / "xclip").write_text(clip)
+    for name in ("wl-copy", "wl-paste", "xclip") + PASTERS:
+        (stubs / name).write_text(CLIP_STUB)
     (stubs / "notify-send").write_text(f'#!/bin/bash\nprintf "%s\\n" "$*" >> {notified}\n')
     for stub in stubs.iterdir():
         stub.chmod(0o755)
-    env = dict(os.environ, HOME=str(home), PATH=f"{stubs}:{os.environ['PATH']}")
+    env = dict(os.environ, HOME=str(home), STUB_DIR=str(stubs),
+               PATH=f"{stubs}:{os.environ['PATH']}")
     env.pop("WAYLAND_DISPLAY", None)
     if wayland:
         env["WAYLAND_DISPLAY"] = "wayland-1"
     done = subprocess.run([str(VOXTYPE_LAST)], capture_output=True, text=True, env=env)
-    return done, copied.read_text() if copied.exists() else None, notified.read_text()
+    calls_file = stubs / "calls"
+    calls = [tuple(json.loads(line)) for line in calls_file.read_text().splitlines()] if calls_file.exists() else []
+    after = json.loads((stubs / "held").read_text()) if (stubs / "held").exists() else None
+    return done, calls, after, notified.read_text()
+
+
+def _pasted(calls):
+    """The text on the clipboard when the paste key went down, or None if it never did."""
+    text = None
+    for name, args, given in calls:
+        if name in ("wl-copy", "xclip") and "-o" not in args:
+            text = given
+        if name in PASTERS:
+            return text
+    return None
 
 
 def _said(text: str) -> str:
@@ -285,40 +334,73 @@ def _counted(chars: int) -> str:
     )
 
 
-def test_last_dictation_copies_the_newest_with_its_quotes(tmp_path):
+def test_last_dictation_pastes_the_newest_with_its_quotes(tmp_path):
     journal = _said("first one") + "INFO Recording started\n" + _said('she said "hi" twice')
-    done, copied, notified = _last(tmp_path, journal)
+    done, calls, _, notified = _last(tmp_path, journal)
     assert done.returncode == 0, done.stderr
-    assert copied == 'she said "hi" twice'
-    assert "(copied)" in notified
-    assert "wl-copy" in (tmp_path / "clip").read_text()
+    assert _pasted(calls) == 'she said "hi" twice'
+    assert ("wtype", ["-M", "shift", "-k", "Insert", "-m", "shift"], "") in calls
+    assert notified == ""
 
 
-def test_last_dictation_on_x11_copies_with_xclip(tmp_path):
-    done, copied, _ = _last(tmp_path, _said("on x11"), wayland=False)
+def test_last_dictation_puts_the_clipboard_back(tmp_path):
+    held = {"text/html": "<b>mine</b>", "text/plain;charset=utf-8": "mine"}
+    done, calls, after, _ = _last(tmp_path, _said("dictated"), held=held)
     assert done.returncode == 0, done.stderr
-    assert copied == "on x11"
-    assert "xclip -selection clipboard" in (tmp_path / "clip").read_text()
+    assert _pasted(calls) == "dictated"
+    assert after == {"text/plain;charset=utf-8": "mine"}
+
+
+def test_last_dictation_leaves_an_empty_clipboard_empty(tmp_path):
+    done, calls, after, _ = _last(tmp_path, _said("dictated"))
+    assert done.returncode == 0, done.stderr
+    assert _pasted(calls) == "dictated" and after is None
+
+
+def test_last_dictation_on_gnome_wayland_presses_through_dotool(tmp_path):
+    done, calls, _, _ = _last(tmp_path, _said("on gnome"), fail=["wtype"])
+    assert done.returncode == 0, done.stderr
+    assert ("dotool", [], "key shift+insert\n") in calls
+    assert _pasted(calls[1:]) == "on gnome"
+
+
+def test_last_dictation_on_x11_pastes_with_xclip_and_xdotool(tmp_path):
+    done, calls, after, _ = _last(
+        tmp_path, _said("on x11"), held={"TARGETS": "", "UTF8_STRING": "mine"}, wayland=False
+    )
+    assert done.returncode == 0, done.stderr
+    assert _pasted(calls) == "on x11"
+    assert ("xdotool", ["key", "shift+Insert"], "") in calls
+    assert after == {"UTF8_STRING": "mine"}
+
+
+def test_last_dictation_leaves_it_on_the_clipboard_when_no_key_can_be_pressed(tmp_path):
+    done, _, after, notified = _last(
+        tmp_path, _said("keep this"), fail=PASTERS, held={"text/plain": "mine"}
+    )
+    assert done.returncode == 1
+    assert after == {"text/plain;charset=utf-8": "keep this"}
+    assert "could not paste" in notified and "keep this" in notified
 
 
 def test_last_dictation_applies_voxtypes_replacements(tmp_path):
-    done, copied, _ = _last(
+    done, calls, _, _ = _last(
         tmp_path, _said("open cloud code here"), replacements='{ "cloud code" = "Claude Code" }'
     )
     assert done.returncode == 0, done.stderr
-    assert copied == "open Claude Code here"
+    assert _pasted(calls) == "open Claude Code here"
 
 
 def test_last_dictation_refuses_an_older_one_when_the_newest_has_no_text(tmp_path):
-    done, copied, notified = _last(tmp_path, _said("an older one") + _counted(868))
+    done, calls, _, notified = _last(tmp_path, _said("an older one") + _counted(868))
     assert done.returncode == 1
-    assert copied is None
+    assert _pasted(calls) is None
     assert "without its text" in notified and "an older one" not in notified
 
 
 def test_last_dictation_refuses_a_length_only_journal_cut_before_its_start(tmp_path):
-    done, copied, notified = _last(tmp_path, "INFO Transcribed 868 chars (whisper engine)\n")
-    assert done.returncode == 1 and copied is None
+    done, calls, _, notified = _last(tmp_path, "INFO Transcribed 868 chars (whisper engine)\n")
+    assert done.returncode == 1 and _pasted(calls) is None
     assert "without its text" in notified
 
 
@@ -328,24 +410,24 @@ def test_last_dictation_reads_the_text_logged_beside_the_length(tmp_path):
         started + _said("the newest") + "INFO Transcribed 10 chars (whisper engine)\n",
         started + "INFO Transcribed 10 chars (whisper engine)\n" + _said("the newest"),
     ):
-        done, copied, _ = _last(tmp_path, _said("an older one") + newest)
+        done, calls, _, _ = _last(tmp_path, _said("an older one") + newest)
         assert done.returncode == 0, done.stderr
-        assert copied == "the newest"
+        assert _pasted(calls) == "the newest"
 
 
 def test_last_dictation_without_one_says_so(tmp_path):
-    done, copied, notified = _last(tmp_path, "INFO Recording started\n")
-    assert done.returncode == 0 and copied is None
+    done, calls, _, notified = _last(tmp_path, "INFO Recording started\n")
+    assert done.returncode == 0 and calls == []
     assert "Nothing dictated" in notified
 
 
 def test_last_dictation_says_so_when_the_journal_fails(tmp_path):
-    done, copied, notified = _last(tmp_path, "", journal_status=1)
-    assert done.returncode == 1 and copied is None
+    done, calls, _, notified = _last(tmp_path, "", journal_status=1)
+    assert done.returncode == 1 and calls == []
     assert "Could not read" in notified
 
 
 def test_last_dictation_still_shows_the_text_when_copying_fails(tmp_path):
-    done, _, notified = _last(tmp_path, _said("keep this"), copy_status=1)
-    assert done.returncode == 1
-    assert "(not copied)" in notified and "keep this" in notified
+    done, calls, _, notified = _last(tmp_path, _said("keep this"), fail=["wl-copy"])
+    assert done.returncode == 1 and _pasted(calls) is None
+    assert "(not pasted)" in notified and "keep this" in notified

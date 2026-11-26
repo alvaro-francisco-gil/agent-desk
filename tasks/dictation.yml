@@ -2,7 +2,7 @@
 # Dictation with voxtype, the same keys as on the Omarchy workstation:
 #   F9 held   talk while it is down (voxtype's own keyboard watcher)
 #   Alt+F9    start, and again to stop, for a longer one
-#   Shift+F9  copy the last dictation and show it
+#   Shift+F9  paste the last dictation again, keeping the clipboard
 # Run by install.yml when agent_desk_dictation is true; tests/test_dictation.py
 # runs it alone. Needs agent_desk_home and agent_desk_dir. The root steps (the
 # voxtype package, the input group, the GPU switch) are the README's, done once.
@@ -111,6 +111,6 @@
             command: voxtype record toggle
             binding: <Alt>F9
           - id: agent-desk-dictation-last
-            name: Copy last dictation
+            name: Paste last dictation
             command: "{{ agent_desk_home }}/.local/bin/voxtype-last"
             binding: <Shift>F9
