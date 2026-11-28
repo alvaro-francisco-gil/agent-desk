@@ -12,6 +12,7 @@ Machines take it with `git pull`; only the owner pushes.
 - **Changes are made and tried on the main workstation**, then pulled elsewhere. A
   machine that only pulls never needs a GitHub login.
 - **Code changes go through a PR whose tests pass** (`.github/workflows/test.yml`);
+  once they pass, the agent merges it itself, no need to ask (2026-11-28).
   Markdown-only changes go straight to `main`.
 - `wt.ps1` and `wt-ssh.ps1` must stay safe to re-run: they replace only what they added
   and back up first.
