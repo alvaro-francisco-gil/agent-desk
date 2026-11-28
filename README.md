@@ -63,7 +63,9 @@ In the Alt+N picker, Enter starts the session on the `/login` account and Alt+2 
 (Alt+3 on a third). `cs <repo> --as second` does the same from a shell. The status line shows
 the account's name in magenta after the session name; no name means the `/login` account.
 Settings, history, memory and plugins are shared. In Alt+P, Enter reopens a closed session
-on the `/login` account and Alt+2… on the others.
+on the `/login` account and Alt+2… on the others. It lists every closed session, newest
+first; type to filter. Sessions another Claude session started (an orchestrator's workers)
+are hidden behind the last row, "show hidden helper sessions".
 
 A conversation keeps the account it started on. To move one, open or closed, to another account:
 

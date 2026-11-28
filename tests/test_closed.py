@@ -76,3 +76,29 @@ def test_closed_sessions_keeps_its_cache_on_disk(tmp_path):
     assert str(projects / "-dir" / "s.jsonl") in json.loads(cache_file.read_text())
     cache_file.write_text("not json")
     assert [s.name for s in closed_sessions(projects, set(), cache_file=cache_file)] == ["x"]
+
+
+def test_sessions_another_session_started_or_in_a_claude_worktree_are_helpers(tmp_path):
+    projects, repo = tmp_path / "projects", tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "w1"
+    worktree.mkdir(parents=True)
+    named = {"type": "custom-title", "customTitle": "x"}
+    started = {"type": "derived-from", "sessions": [{"id": "boss", "via": "subprocess"}]}
+    resumed = {"type": "derived-from", "sessions": [{"id": "old", "via": "resume"}]}
+    transcript(projects, "mine", repo, named, resumed, mtime=100)
+    transcript(projects, "worker", repo, started, named, mtime=200)
+    transcript(projects, "in-tree", worktree, named, mtime=300)
+    found = closed_sessions(projects, set())
+    assert [(s.session_id, s.helper) for s in found] == [("in-tree", True), ("worker", True), ("mine", False)]
+
+
+def test_a_cache_written_before_helpers_were_marked_is_read_again(tmp_path):
+    projects, repo = tmp_path / "projects", tmp_path / "repo"
+    repo.mkdir()
+    p = transcript(projects, "worker", repo,
+                   {"type": "derived-from", "sessions": [{"id": "boss", "via": "subprocess"}]},
+                   {"type": "custom-title", "customTitle": "x"})
+    old = {str(p): {"offset": p.stat().st_size, "cwd": str(repo), "custom": "x", "ai": None, "prompt": None}}
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text(json.dumps(old), encoding="utf-8")
+    assert [s.helper for s in closed_sessions(projects, set(), cache_file=cache_file)] == [True]

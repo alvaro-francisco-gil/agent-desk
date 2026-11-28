@@ -318,3 +318,27 @@ def test_here_is_the_callers_own_session(tmp_path, work, monkeypatch, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     assert main(["--switch", "here", "--as", "login"], path) == 1
     assert "only works from inside" in capsys.readouterr().err
+
+
+def test_alt_p_hides_helpers_until_their_row_is_picked(tmp_path, work, monkeypatch):
+    import agent_desk.session as session
+    from agent_desk.closed import Closed
+
+    monkeypatch.setattr(session, "closed_sessions", lambda *a, **k: [
+        Closed("sid-w", work / "zeta", "worker", 0.0, helper=True),
+        Closed("sid-m", work / "zeta", "mine", 0.0)])
+    monkeypatch.setattr(session, "open_ids", lambda: set())
+    monkeypatch.setattr(session.shutil, "which", lambda _: "/usr/bin/fzf")
+    shown, picks = [], iter(["helpers\tx\n", "0\tx\n"])
+
+    def fzf(argv, input, stdout, text):
+        shown.append(input.splitlines())
+        return subprocess.CompletedProcess(argv, 0, stdout=next(picks))
+
+    monkeypatch.setattr(session.subprocess, "run", fzf)
+    opened = _opened(monkeypatch)
+    assert main(["--closed"], config(tmp_path, f'[repos]\nfolders = ["{work}"]\n')) == 0
+    assert [l.split("\t")[0] for l in shown[0]] == ["0", "helpers"] and "mine" in shown[0][0]
+    assert "(1)" in shown[0][1]
+    assert len(shown[1]) == 2 and "worker" in shown[1][0]
+    assert opened[0][2].endswith("claude --resume sid-w")
