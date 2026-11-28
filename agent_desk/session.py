@@ -138,25 +138,42 @@ def chosen(stdout: str, names: list[str]) -> tuple[str, str]:
     return line, keys.get(key, names[0])
 
 
+SHOW_HELPERS = "helpers"
+
+
 def pick_closed(found: dict[str, Path], names: list[str]) -> tuple[str, Path, str, str] | None:
-    """List the closed sessions; returns the picked one's workspace label, folder, session id and account."""
+    """List the closed sessions; returns the picked one's workspace label, folder, session id and account.
+
+    Helper sessions (another Claude session started them) stay hidden behind a last row
+    that lists everything again with them in.
+    """
     sessions = closed_sessions(Path("~/.claude/projects").expanduser(), open_ids(), cache_file=CACHE)
     if not sessions:
         print("cs: no closed sessions to reopen", file=sys.stderr)
         return None
     if not shutil.which("fzf"):
         raise RuntimeError("fzf is missing")
-    rows = [(s, place(s.cwd, found)) for s in sessions]
-    width = max(len(label) for _, label in rows)
-    lines = [f"{i}\t{ago(s.closed_at):>8}  {label:<{width}}  {s.name}" for i, (s, label) in enumerate(rows)]
-    done = subprocess.run(["fzf", "--prompt", "reopen ▸ ", "--height", "~100%", "--reverse",
-                           "--delimiter", "\t", "--with-nth", "2..", "--no-sort", *account_flags(names)],
-                          input="\n".join(lines), stdout=subprocess.PIPE, text=True)
-    line, account = chosen(done.stdout, names)
-    if not line.strip():
-        return None
-    session, label = rows[int(line.split("\t", 1)[0])]
-    return label, session.cwd, session.session_id, account
+    hidden = sum(s.helper for s in sessions)
+    show_helpers = hidden == len(sessions)
+    while True:
+        shown = sessions if show_helpers else [s for s in sessions if not s.helper]
+        rows = [(s, place(s.cwd, found)) for s in shown]
+        width = max(len(label) for _, label in rows)
+        lines = [f"{i}\t{ago(s.closed_at):>8}  {label:<{width}}  {s.name}" for i, (s, label) in enumerate(rows)]
+        if hidden and not show_helpers:
+            lines.append(f"{SHOW_HELPERS}\t  ▸ show hidden helper sessions ({hidden})")
+        done = subprocess.run(["fzf", "--prompt", "reopen ▸ ", "--height", "~100%", "--reverse",
+                               "--delimiter", "\t", "--with-nth", "2..", "--no-sort", *account_flags(names)],
+                              input="\n".join(lines), stdout=subprocess.PIPE, text=True)
+        line, account = chosen(done.stdout, names)
+        if not line.strip():
+            return None
+        key = line.split("\t", 1)[0]
+        if key == SHOW_HELPERS:
+            show_helpers = True
+            continue
+        session, label = rows[int(key)]
+        return label, session.cwd, session.session_id, account
 
 
 def reopen(found: dict[str, Path], known: dict[str, Path | None]) -> int:
@@ -207,7 +224,7 @@ def main(argv: list[str], config: Path = repos.CONFIG) -> int:
         print("usage: cs [repo] [--as account]  start Claude in a repo, as a herdr workspace named after it\n"
               "                                 (in the picker, Alt+2… start it on the next accounts)\n"
               "       cs <repo> --run <line>  type <line> at the new tab's prompt instead of claude\n"
-              "       cs --closed  reopen one of the Claude sessions closed most recently (Alt+2… on another account)\n"
+              "       cs --closed  reopen a closed Claude session, newest first, helpers hidden (Alt+2… on another account)\n"
               "       cs --switch <session> --as <account>  reopen a conversation, open or closed, on that account\n"
               "                     (<session>: an id, a name, or `here` for the agent's own session)\n"
               "       cs --sessions  list the sessions --switch knows: id, open or closed, repo, name\n"

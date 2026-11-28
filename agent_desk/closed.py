@@ -3,6 +3,9 @@
 A session is a transcript in ~/.claude/projects/<dir>/<session id>.jsonl. It counts as
 closed when no herdr pane runs it. Sessions whose folder is gone (a deleted worktree)
 can't be resumed and are left out, as are sessions with no prompt typed.
+
+Helper sessions, the ones another Claude session started (an orchestrator's workers,
+usually in a .claude/worktrees/ folder), are marked so the picker can hide them.
 """
 from __future__ import annotations
 
@@ -11,7 +14,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-LIMIT = 30
 # What each transcript has been read up to, so a large one is read once, not on every Alt+P.
 CACHE = Path("~/.cache/agent-desk/transcripts.json").expanduser()
 
@@ -22,32 +24,43 @@ class Closed:
     cwd: Path
     name: str
     closed_at: float
+    helper: bool = False
 
 
 def read_transcript(path: Path, cache: dict | None = None) -> tuple[Path | None, str | None]:
-    """The session's folder and its name: the last /rename, else Claude's title, else the last prompt.
+    """The session's folder and its name: the last /rename, else Claude's title, else the last prompt."""
+    cwd, name, _ = read_session(path, cache)
+    return cwd, name
+
+
+def read_session(path: Path, cache: dict | None = None) -> tuple[Path | None, str | None, bool]:
+    """read_transcript, plus whether another Claude session started this one.
 
     Transcripts only grow, so with a cache (path -> what was read so far) only the lines
-    added since the last call are read; a file shorter than what was read is read again.
+    added since the last call are read; a file shorter than what was read is read again,
+    and so is one cached before a field was added.
     """
     key = str(path)
     state = (cache or {}).get(key)
     try:
         size = path.stat().st_size
-        if not state or state.get("offset", 0) > size:
-            state = {"offset": 0, "cwd": None, "custom": None, "ai": None, "prompt": None}
+        if not state or "spawned" not in state or state.get("offset", 0) > size:
+            state = {"offset": 0, "cwd": None, "custom": None, "ai": None, "prompt": None, "spawned": False}
         with path.open("rb") as f:
             f.seek(state["offset"])
             data = f.read()
     except OSError:
-        return None, None
+        return None, None, False
     end = data.rfind(b"\n") + 1  # a line still being written waits for the next call
     for raw in data[:end].splitlines():
         line = raw.decode("utf-8", errors="replace")
         try:
             if state["cwd"] is None and '"cwd":' in line:
                 state["cwd"] = json.loads(line).get("cwd")
-            if '"type":"custom-title"' in line:
+            if '"type":"derived-from"' in line:
+                via = {s.get("via") for s in json.loads(line).get("sessions") or [] if isinstance(s, dict)}
+                state["spawned"] = state["spawned"] or "subprocess" in via
+            elif '"type":"custom-title"' in line:
                 state["custom"] = json.loads(line).get("customTitle") or state["custom"]
             elif '"type":"ai-title"' in line:
                 state["ai"] = json.loads(line).get("aiTitle") or state["ai"]
@@ -59,7 +72,9 @@ def read_transcript(path: Path, cache: dict | None = None) -> tuple[Path | None,
     if cache is not None:
         cache[key] = state
     name = state["custom"] or state["ai"] or state["prompt"]
-    return (Path(state["cwd"]) if state["cwd"] else None), (" ".join(name.split()) if name else None)
+    cwd = Path(state["cwd"]) if state["cwd"] else None
+    in_worktree = cwd is not None and (".claude", "worktrees") in zip(cwd.parts, cwd.parts[1:])
+    return cwd, (" ".join(name.split()) if name else None), state["spawned"] or in_worktree
 
 
 def load_cache(cache_file: Path | None) -> dict:
@@ -86,20 +101,23 @@ def save_cache(cache_file: Path | None, cache: dict, transcripts: list[Path]) ->
         pass
 
 
-def closed_sessions(projects: Path, open_ids: set[str], limit: int = LIMIT,
+def closed_sessions(projects: Path, open_ids: set[str], limit: int | None = None,
                     cache_file: Path | None = None) -> list[Closed]:
-    """Newest first: transcripts no herdr pane runs, with a prompt typed and a folder still on disk."""
+    """Newest first: transcripts no herdr pane runs, with a prompt typed and a folder still on disk.
+
+    All of them unless a limit is given: with the cache, reading every one takes a fraction of a second.
+    """
     transcripts = sorted(projects.glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     cache = load_cache(cache_file)
     found: list[Closed] = []
     for path in transcripts:
         if path.stem in open_ids:
             continue
-        cwd, name = read_transcript(path, cache)
+        cwd, name, helper = read_session(path, cache)
         if cwd is None or name is None or not cwd.is_dir():
             continue
-        found.append(Closed(path.stem, cwd, name, path.stat().st_mtime))
-        if len(found) >= limit:
+        found.append(Closed(path.stem, cwd, name, path.stat().st_mtime, helper))
+        if limit is not None and len(found) >= limit:
             break
     save_cache(cache_file, cache, transcripts)
     return found
